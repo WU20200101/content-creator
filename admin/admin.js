@@ -1,8 +1,9 @@
-const workerUrl = document.getElementById("workerUrl");
-const token = document.getElementById("token");
-const output = document.getElementById("output");
-const jobs = document.getElementById("jobs");
-const userProfile = document.getElementById("userProfile");
+// -------------------- DOM --------------------
+const workerUrlEl = document.getElementById("workerUrl");
+const tokenEl = document.getElementById("token");
+const outputEl = document.getElementById("output");
+const jobsEl = document.getElementById("jobs");
+const userProfileEl = document.getElementById("userProfile");
 
 function mustEl(id) {
   const el = document.getElementById(id);
@@ -12,45 +13,75 @@ function mustEl(id) {
 
 const baselineMount = mustEl("baselineMount");
 
+// -------------------- Utils --------------------
+function normBase(url) {
+  return String(url || "").trim().replace(/\/+$/, "");
+}
 
+function authHeaders() {
+  const t = String(tokenEl.value || "").trim();
+  return t ? { Authorization: "Bearer " + t } : {};
+}
 
+function setStatus(text) {
+  outputEl.textContent = text || "";
+}
+
+function safeJsonParse(str, fallback = null) {
+  try { return JSON.parse(str); } catch { return fallback; }
+}
+
+// -------------------- Persist conn --------------------
 document.getElementById("saveConn").onclick = () => {
-  localStorage.setItem("cc_url", workerUrl.value);
-  localStorage.setItem("cc_token", token.value);
+  localStorage.setItem("cc_url", workerUrlEl.value);
+  localStorage.setItem("cc_token", tokenEl.value);
   alert("已保存");
 };
 
-workerUrl.value = localStorage.getItem("cc_url") || "";
-token.value = localStorage.getItem("cc_token") || "";
+workerUrlEl.value = localStorage.getItem("cc_url") || "";
+tokenEl.value = localStorage.getItem("cc_token") || "";
 
-// ---- Load UI schema + render
+// -------------------- Load UI Schema --------------------
 document.getElementById("loadSchema").onclick = async () => {
-  output.textContent = "";
+  setStatus("");
   baselineMount.innerHTML = "加载中…";
 
-  const res = await fetch(workerUrl.value.replace(/\/$/, "") + "/api/ui/baseline", {
-    headers: { Authorization: "Bearer " + token.value }
-  });
-
-  const text = await res.text();
-  if (!res.ok) {
+  const base = normBase(workerUrlEl.value);
+  if (!base) {
     baselineMount.innerHTML = "";
-    output.textContent = `UI schema load failed: ${res.status}\n${text}`;
+    setStatus("Worker URL 为空");
     return;
   }
 
-  let ui;
-  try { ui = JSON.parse(text); }
-  catch (e) {
-    baselineMount.innerHTML = "";
-    output.textContent = `UI schema JSON parse failed\n${text.slice(0, 800)}`;
-    return;
-  }
+  try {
+    const res = await fetch(base + "/api/ui/baseline", {
+      method: "GET",
+      headers: { ...authHeaders() }
+    });
 
-  renderBaselineUI(ui);
+    const text = await res.text();
+    if (!res.ok) {
+      baselineMount.innerHTML = "";
+      setStatus(`UI schema load failed: ${res.status}\n${text}`);
+      return;
+    }
+
+    const ui = safeJsonParse(text);
+    if (!ui) {
+      baselineMount.innerHTML = "";
+      setStatus(`UI schema JSON parse failed\n${text.slice(0, 1000)}`);
+      return;
+    }
+
+    renderBaselineUI(ui);
+    setStatus("Schema 已加载并渲染");
+  } catch (e) {
+    baselineMount.innerHTML = "";
+    setStatus("UI schema fetch failed: " + String(e?.message || e));
+  }
 };
 
-// ---- Render
+// -------------------- Render Baseline UI --------------------
 function renderBaselineUI(ui) {
   baselineMount.innerHTML = "";
 
@@ -65,7 +96,7 @@ function renderBaselineUI(ui) {
     card.style.marginTop = "12px";
 
     const h = document.createElement("h3");
-    h.textContent = section.title || section.section_id;
+    h.textContent = section.title || section.section_id || "Section";
     card.appendChild(h);
 
     if (section.subtitle) {
@@ -90,7 +121,7 @@ function renderField(field) {
 
   const label = document.createElement("div");
   label.style.fontWeight = "600";
-  label.textContent = field.label || field.field_id;
+  label.textContent = field.label || field.field_id || "field";
   wrap.appendChild(label);
 
   if (field.help) {
@@ -124,7 +155,10 @@ function renderField(field) {
       o.textContent = opt.label ?? String(opt.value);
       el.appendChild(o);
     });
-    el.value = field.default != null ? String(field.default) : (ctrl.options?.[0]?.value ?? "");
+    el.value = field.default != null
+      ? String(field.default)
+      : String(ctrl.options?.[0]?.value ?? "");
+    el.dataset.kind = "string";
   }
 
   // slider
@@ -149,9 +183,7 @@ function renderField(field) {
     row.appendChild(val);
     wrap.appendChild(row);
 
-    el.dataset.path = bindPath;
     el.dataset.kind = "number";
-    return wrap;
   }
 
   // number
@@ -162,6 +194,7 @@ function renderField(field) {
     el.max = ctrl.max ?? "";
     el.step = ctrl.step ?? "1";
     el.value = field.default ?? "";
+    el.dataset.kind = "number";
   }
 
   // switch
@@ -194,7 +227,7 @@ function renderField(field) {
     });
   }
 
-  // taglist（先用 textarea 简化，后面再做tag输入）
+  // taglist: comma separated
   else if (ctrl.type === "taglist") {
     el = document.createElement("textarea");
     el.rows = 3;
@@ -203,7 +236,7 @@ function renderField(field) {
     el.dataset.kind = "taglist";
   }
 
-  // kv_percent（先用 textarea 输入json，后面再做更漂亮控件）
+  // kv_percent / json
   else if (ctrl.type === "kv_percent") {
     el = document.createElement("textarea");
     el.rows = 4;
@@ -211,27 +244,27 @@ function renderField(field) {
     el.dataset.kind = "json";
   }
 
+  // fallback
   else {
     el = document.createElement("textarea");
     el.rows = 3;
-    el.value = JSON.stringify(field.default ?? null);
+    el.value = field.default == null ? "" : JSON.stringify(field.default);
     el.dataset.kind = "json";
   }
 
+  // bind
   el.dataset.path = bindPath;
 
-  // 默认 kind 推断
-  if (!el.dataset.kind) {
-    if (ctrl.type === "number") el.dataset.kind = "number";
-    else if (ctrl.type === "select") el.dataset.kind = "string";
-    else el.dataset.kind = "string";
+  // default styling for controls created here
+  if (el.tagName === "SELECT" || el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+    el.style.marginTop = "6px";
   }
 
   wrap.appendChild(el);
   return wrap;
 }
 
-// ---- Collect patch (writes into baseline root)
+// -------------------- Collect patch --------------------
 function collectBaselinePatch() {
   const patch = {};
 
@@ -248,10 +281,14 @@ function collectBaselinePatch() {
     } else if (kind === "array") {
       value = [...node.querySelectorAll("input[type=checkbox]:checked")].map(i => i.value);
     } else if (kind === "taglist") {
-      value = node.value.split(",").map(s => s.trim()).filter(Boolean);
+      value = String(node.value || "")
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
     } else if (kind === "json") {
-      try { value = JSON.parse(node.value); }
-      catch { value = node.value; }
+      const v = String(node.value || "");
+      const parsed = safeJsonParse(v);
+      value = parsed == null ? v : parsed;
     } else {
       value = node.value;
     }
@@ -263,7 +300,7 @@ function collectBaselinePatch() {
 }
 
 function setDeep(obj, path, value) {
-  const keys = path.split(".");
+  const keys = String(path).split(".");
   let cur = obj;
   for (let i = 0; i < keys.length - 1; i++) {
     const k = keys[i];
@@ -273,14 +310,20 @@ function setDeep(obj, path, value) {
   cur[keys[keys.length - 1]] = value;
 }
 
-// ---- Generate (tuning override patch)
+// -------------------- Generate --------------------
 document.getElementById("generate").onclick = async () => {
-  output.textContent = "生成中…";
+  setStatus("生成中…");
 
-  let profile;
-  try { profile = JSON.parse(userProfile.value || "{}"); }
-  catch (e) {
-    output.textContent = "user_profile 不是合法 JSON";
+  const base = normBase(workerUrlEl.value);
+  if (!base) {
+    setStatus("Worker URL 为空");
+    return;
+  }
+
+  const profileText = userProfileEl.value || "{}";
+  const profile = safeJsonParse(profileText);
+  if (!profile) {
+    setStatus("user_profile 不是合法 JSON");
     return;
   }
 
@@ -291,22 +334,39 @@ document.getElementById("generate").onclick = async () => {
     tuning: { override_enabled: true, override_patch: patch }
   };
 
-  const res = await fetch(workerUrl.value.replace(/\/$/, "") + "/api/generate", {
-    method: "POST",
-    headers: {
-      Authorization: "Bearer " + token.value,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+  try {
+    const res = await fetch(base + "/api/generate", {
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
 
-  output.textContent = await res.text();
+    const text = await res.text();
+    setStatus(text);
+  } catch (e) {
+    setStatus("generate fetch failed: " + String(e?.message || e));
+  }
 };
 
-// ---- Jobs
+// -------------------- Jobs --------------------
 document.getElementById("loadJobs").onclick = async () => {
-  const res = await fetch(workerUrl.value.replace(/\/$/, "") + "/api/jobs", {
-    headers: { Authorization: "Bearer " + token.value }
-  });
-  jobs.textContent = await res.text();
+  const base = normBase(workerUrlEl.value);
+  if (!base) {
+    jobsEl.textContent = "Worker URL 为空";
+    return;
+  }
+
+  try {
+    const res = await fetch(base + "/api/jobs", {
+      method: "GET",
+      headers: { ...authHeaders() }
+    });
+
+    jobsEl.textContent = await res.text();
+  } catch (e) {
+    jobsEl.textContent = "jobs fetch failed: " + String(e?.message || e);
+  }
 };
