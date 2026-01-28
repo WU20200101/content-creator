@@ -1,1 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>content-creator · Admin</title>
+  <link rel="stylesheet" href="./admin.css"/>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-title">content-creator · Admin</div>
+      <div class="brand-sub">R2 → Workers → OpenAI → D1</div>
+    </div>
+
+    <div class="top-actions">
+      <button id="btnReloadSchemas" class="btn btn-ghost">重新加载 Schema</button>
+      <button id="btnResetAll" class="btn btn-ghost">重置全部</button>
+      <button id="btnGenerate" class="btn btn-primary">生成内容</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="card connect">
+      <div class="card-title">连接</div>
+      <div class="grid2">
+        <div class="field">
+          <label>Worker Base URL</label>
+          <input id="workerUrl" type="text" placeholder="https://xxx.workers.dev"/>
+        </div>
+        <div class="field">
+          <label>Admin Key（可选）</label>
+          <input id="adminKey" type="password" placeholder="如果你的 worker 需要鉴权就填"/>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="field">
+          <label>Generate API Path</label>
+          <input id="generatePath" type="text" value="/admin/generate"/>
+          <div class="hint">如果你 worker 的路径不是这个，改这里即可（你不需要改代码）。</div>
+        </div>
+        <div class="field">
+          <label>Preview Only</label>
+          <div class="switch-row">
+            <input id="previewOnly" type="checkbox"/>
+            <span class="hint">勾选后只生成 Prompt 预览，不发请求</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="layout">
+      <aside class="left">
+        <div class="panel-header">
+          <div class="panel-title">客户信息（参考）</div>
+          <div class="panel-sub">左侧只做“输入参考”，不承担最高约束</div>
+        </div>
+        <div id="mountUserProfile" class="panel-body"></div>
+      </aside>
+
+      <section class="right">
+        <div class="stack">
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Baseline（可调）</div>
+              <div class="panel-sub">右侧以 Baseline 顺序为准</div>
+            </div>
+            <div id="mountBaseline" class="panel-body"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">内容调节（最高标准）</div>
+              <div class="panel-sub">常规留空；填写则覆盖 Baseline 与客户信息</div>
+            </div>
+            <div id="mountTuning" class="panel-body"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Prompt 预览（发送前最后检查）</div>
+              <div class="panel-sub">你可以在这里确认“最终发给 AI 的 Prompt”</div>
+            </div>
+            <div class="panel-body">
+              <div class="row">
+                <button id="btnBuildPrompt" class="btn btn-ghost">生成/刷新 Prompt 预览</button>
+                <button id="btnCopyPrompt" class="btn btn-ghost">复制 Prompt</button>
+              </div>
+              <pre id="promptPreview" class="codebox"></pre>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">Prompt 预设（必须）</div>
+              <div class="panel-sub">可储存 / 删除 / 修改（默认 localStorage，无需改 Worker）</div>
+            </div>
+            <div class="panel-body">
+              <div class="grid2">
+                <div class="field">
+                  <label>预设名称</label>
+                  <input id="presetName" type="text" placeholder="例如：XHS-冷感-强去AI-v1"/>
+                </div>
+                <div class="field">
+                  <label>筛选</label>
+                  <input id="presetSearch" type="text" placeholder="输入关键词过滤"/>
+                </div>
+              </div>
+
+              <div class="row">
+                <button id="btnSavePresetNew" class="btn btn-primary">保存为新预设</button>
+                <button id="btnUpdatePreset" class="btn btn-ghost">覆盖更新选中预设</button>
+                <button id="btnDeletePreset" class="btn btn-danger">删除选中预设</button>
+              </div>
+
+              <div class="preset-list-wrap">
+                <div id="presetList" class="preset-list"></div>
+              </div>
+
+              <div class="hint">
+                预设保存的是：客户信息 + baseline + 内容调节 + Prompt 预览结果（方便你复用与快速回滚）。
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <div class="panel-title">输出</div>
+              <div class="panel-sub">生成结果（或错误信息）</div>
+            </div>
+            <div class="panel-body">
+              <pre id="outputBox" class="codebox"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="./admin.js"></script>
+</body>
+</html>
 
