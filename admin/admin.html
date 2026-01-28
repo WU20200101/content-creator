@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>content-creator Admin</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>content-creator · Admin</h1>
+  <p>R2 → Workers → OpenAI → D1</p>
+</header>
+
+<section class="card">
+  <h2>连接</h2>
+  <input id="workerUrl" placeholder="Worker URL">
+  <input id="token" placeholder="ADMIN_TOKEN" type="password">
+  <button id="saveConn">保存</button>
+</section>
+
+<section class="card">
+  <h2>客户信息 (user_profile)</h2>
+  <textarea id="userProfile"></textarea>
+</section>
+
+<section class="card">
+  <h2>Baseline（规则参数）</h2>
+  <textarea id="baseline"></textarea>
+  <button id="loadSchema">加载 Schema</button>
+</section>
+
+<section class="card">
+  <h2>生成</h2>
+  <button id="generate">生成内容</button>
+  <pre id="output"></pre>
+</section>
+
+<section class="card">
+  <h2>历史 Jobs</h2>
+  <button id="loadJobs">刷新</button>
+  <pre id="jobs"></pre>
+</section>
+
+</div>
+<script src="admin.js"></script>
+</body>
+</html>
