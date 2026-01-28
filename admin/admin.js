@@ -5,100 +5,70 @@ const userProfile = document.getElementById("userProfile");
 const overrideText = document.getElementById("overrideText");
 const output = document.getElementById("output");
 const promptPreview = document.getElementById("promptPreview");
-
 const presetName = document.getElementById("presetName");
 const presetList = document.getElementById("presetList");
 
 workerUrl.value = localStorage.getItem("cc_url") || "";
 token.value = localStorage.getItem("cc_token") || "";
 
-// Save connection
+// Save worker conn
 document.getElementById("saveConn").onclick = () => {
   localStorage.setItem("cc_url", workerUrl.value);
   localStorage.setItem("cc_token", token.value);
-  alert("已保存");
+  alert("Saved");
 };
 
-// Load Baseline UI Schema
+// Load schema
 document.getElementById("loadSchema").onclick = async () => {
-  baselineMount.innerHTML = "加载中…";
+  baselineMount.innerHTML = "Loading…";
 
   const res = await fetch(workerUrl.value.replace(/\/$/, "") + "/api/ui/baseline", {
     headers: { Authorization: "Bearer " + token.value }
   });
 
-  const text = await res.text();
-  if (!res.ok) {
-    baselineMount.innerHTML = "加载失败\n" + text;
-    return;
-  }
-
-  const ui = JSON.parse(text);
+  const ui = await res.json();
   renderBaselineUI(ui);
 };
 
-// Render Baseline
+// Render UI
 function renderBaselineUI(ui) {
   baselineMount.innerHTML = "";
 
   (ui.sections || []).forEach(section => {
-    const card = document.createElement("div");
-    card.className = "panel";
+    const box = document.createElement("div");
+    box.className = "panel";
 
-    const title = document.createElement("h3");
-    title.textContent = section.title || section.section_id;
-    card.appendChild(title);
+    const h = document.createElement("h3");
+    h.textContent = section.title;
+    box.appendChild(h);
 
-    (section.fields || []).forEach(field => {
-      card.appendChild(renderField(field));
-    });
-
-    baselineMount.appendChild(card);
+    (section.fields || []).forEach(f => box.appendChild(renderField(f)));
+    baselineMount.appendChild(box);
   });
 }
 
 function renderField(field) {
   const wrap = document.createElement("div");
-  wrap.style.marginTop = "10px";
+  wrap.style.marginTop = "8px";
 
   const label = document.createElement("div");
-  label.textContent = field.label || field.field_id;
+  label.textContent = field.label;
   label.style.fontWeight = "600";
   wrap.appendChild(label);
 
-  const bindPath = field.bind?.path;
-  const ctrl = field.control || {};
-  let el;
+  const el = document.createElement("input");
+  el.value = JSON.stringify(field.default ?? "");
+  el.dataset.path = field.bind?.path || "";
 
-  if (ctrl.type === "select") {
-    el = document.createElement("select");
-    (ctrl.options || []).forEach(opt => {
-      const o = document.createElement("option");
-      o.value = opt.value;
-      o.textContent = opt.label || opt.value;
-      el.appendChild(o);
-    });
-    el.value = field.default ?? "";
-  }
-  else {
-    el = document.createElement("input");
-    el.value = JSON.stringify(field.default ?? "");
-  }
-
-  el.dataset.path = bindPath;
   wrap.appendChild(el);
   return wrap;
 }
 
-// Collect Baseline Patch
 function collectBaselinePatch() {
   const patch = {};
-
   baselineMount.querySelectorAll("[data-path]").forEach(el => {
-    const path = el.dataset.path;
-    setDeep(patch, path, el.value);
+    setDeep(patch, el.dataset.path, el.value);
   });
-
   return patch;
 }
 
@@ -112,47 +82,34 @@ function setDeep(obj, path, value) {
   cur[keys.at(-1)] = value;
 }
 
-// Prompt Preview
+// Preview Prompt
 document.getElementById("previewPrompt").onclick = async () => {
   const profile = JSON.parse(userProfile.value || "{}");
   const patch = collectBaselinePatch();
 
-  const body = {
-    user_profile: profile,
-    tuning: {
-      override_enabled: true,
-      override_patch: patch,
-      override_text: overrideText.value
-    }
-  };
-
   const res = await fetch(workerUrl.value.replace(/\/$/, "") + "/api/generate", {
     method: "POST",
     headers: {
       Authorization: "Bearer " + token.value,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ ...body, preview_only: true })
+    body: JSON.stringify({
+      preview_only: true,
+      user_profile: profile,
+      tuning: { override_patch: patch, override_text: overrideText.value }
+    })
   });
 
-  promptPreview.textContent = await res.text();
+  const data = await res.json();
+  promptPreview.textContent = data.prompt || JSON.stringify(data, null, 2);
 };
 
 // Generate
 document.getElementById("generate").onclick = async () => {
-  output.textContent = "生成中…";
+  output.textContent = "Generating…";
 
   const profile = JSON.parse(userProfile.value || "{}");
   const patch = collectBaselinePatch();
-
-  const payload = {
-    user_profile: profile,
-    tuning: {
-      override_enabled: true,
-      override_patch: patch,
-      override_text: overrideText.value
-    }
-  };
 
   const res = await fetch(workerUrl.value.replace(/\/$/, "") + "/api/generate", {
     method: "POST",
@@ -160,7 +117,10 @@ document.getElementById("generate").onclick = async () => {
       Authorization: "Bearer " + token.value,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      user_profile: profile,
+      tuning: { override_patch: patch, override_text: overrideText.value }
+    })
   });
 
   output.textContent = await res.text();
@@ -169,12 +129,10 @@ document.getElementById("generate").onclick = async () => {
 // Presets
 document.getElementById("savePreset").onclick = () => {
   const presets = JSON.parse(localStorage.getItem("cc_presets") || "{}");
-
   presets[presetName.value] = {
     userProfile: userProfile.value,
     overrideText: overrideText.value
   };
-
   localStorage.setItem("cc_presets", JSON.stringify(presets));
   loadPresets();
 };
@@ -187,26 +145,25 @@ function loadPresets() {
 
   for (const name in presets) {
     const row = document.createElement("div");
-    row.style.marginTop = "8px";
 
-    const loadBtn = document.createElement("button");
-    loadBtn.textContent = "载入 " + name;
-    loadBtn.onclick = () => {
+    const btn = document.createElement("button");
+    btn.textContent = name;
+    btn.onclick = () => {
       userProfile.value = presets[name].userProfile;
       overrideText.value = presets[name].overrideText;
     };
 
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "删除";
-    delBtn.style.marginLeft = "6px";
-    delBtn.onclick = () => {
+    const del = document.createElement("button");
+    del.textContent = "删除";
+    del.style.marginLeft = "8px";
+    del.onclick = () => {
       delete presets[name];
       localStorage.setItem("cc_presets", JSON.stringify(presets));
       loadPresets();
     };
 
-    row.appendChild(loadBtn);
-    row.appendChild(delBtn);
+    row.appendChild(btn);
+    row.appendChild(del);
     presetList.appendChild(row);
   }
 }
