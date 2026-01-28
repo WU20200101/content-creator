@@ -1,1 +1,250 @@
+{
+  "ui_schema_version": "content_creator_ui_v2.0.0",
+  "product": "content-creator",
+  "description": "UI schema with 3 modules + prompt preview + prompt presets CRUD.",
+  "layout": {
+    "left": { "module": "user_profile", "title": "客户信息（参考）" },
+    "right": [
+      { "module": "baseline", "title": "Baseline（可调）" },
+      { "module": "tuning", "title": "内容调节（最高标准，通常留空）" },
+      { "panel": "prompt_preview", "title": "Prompt 预览（发送前最后检查）" },
+      { "panel": "prompt_presets", "title": "Prompt 预设（必须：存/删/改）" }
+    ]
+  },
+
+  "forms": {
+    "user_profile": {
+      "sections": [
+        {
+          "title": "基础",
+          "fields": [
+            {
+              "id": "platform",
+              "label": "平台",
+              "control": { "type": "select", "options": ["xiaohongshu", "moments", "weibo", "douyin_copy", "general"] },
+              "bind": "platform"
+            },
+            {
+              "id": "content_count",
+              "label": "内容数量",
+              "control": { "type": "number", "min": 1, "max": 200, "step": 1 },
+              "bind": "content_count"
+            },
+            {
+              "id": "word_min",
+              "label": "单条字数(min)",
+              "control": { "type": "number", "min": 50, "max": 2000, "step": 10 },
+              "bind": "word_count_range.min"
+            },
+            {
+              "id": "word_max",
+              "label": "单条字数(max)",
+              "control": { "type": "number", "min": 50, "max": 2000, "step": 10 },
+              "bind": "word_count_range.max"
+            }
+          ]
+        },
+        {
+          "title": "账号与定位",
+          "fields": [
+            {
+              "id": "age_band",
+              "label": "客户年龄段",
+              "control": { "type": "select", "options": ["18-25", "26-30", "31-35", "36-40", "40+"] },
+              "bind": "age_band"
+            },
+            {
+              "id": "education",
+              "label": "受教育程度",
+              "control": { "type": "select", "options": ["high_school", "college", "bachelor", "master", "phd"] },
+              "bind": "education"
+            },
+            {
+              "id": "account_age",
+              "label": "运营时长",
+              "control": { "type": "select", "options": ["<1m", "1m", "3m", "6m", "12m", "24m+"] },
+              "bind": "account_age"
+            },
+            {
+              "id": "creator_positioning",
+              "label": "个人定位（一句话）",
+              "control": { "type": "text", "placeholder": "例：设计师｜记录在奥克兰的…", "maxLength": 60 },
+              "bind": "creator_positioning"
+            },
+            {
+              "id": "keywords",
+              "label": "关键词",
+              "control": { "type": "taglist", "placeholder": "回车添加；最多30个" },
+              "bind": "keywords"
+            }
+          ]
+        },
+        {
+          "title": "受众",
+          "fields": [
+            {
+              "id": "aud_gender",
+              "label": "性别",
+              "control": { "type": "select", "options": ["all", "female", "male"] },
+              "bind": "target_audience.gender"
+            },
+            {
+              "id": "aud_age",
+              "label": "受众年龄",
+              "control": { "type": "select", "options": ["18-25", "20-30", "25-35", "30-40", "40+"] },
+              "bind": "target_audience.age_band"
+            },
+            {
+              "id": "aud_interest",
+              "label": "领域/兴趣",
+              "control": { "type": "text", "placeholder": "例：职场｜情绪｜亲密关系", "maxLength": 40 },
+              "bind": "target_audience.interest"
+            }
+          ]
+        },
+        {
+          "title": "补充（可选）",
+          "fields": [
+            {
+              "id": "tone_notes",
+              "label": "客户补充要求",
+              "control": { "type": "textarea", "rows": 6, "placeholder": "写清楚：不带货/能不能提产品/口吻偏冷还是偏日常…" },
+              "bind": "tone_notes"
+            }
+          ]
+        }
+      ]
+    },
+
+    "baseline": {
+      "sections": [
+        {
+          "title": "核心旋钮",
+          "subtitle": "只调强度，不改底层原则",
+          "fields": [
+            {
+              "id": "de_ai_strength",
+              "label": "去AI强度",
+              "control": {
+                "type": "select",
+                "options": ["low", "medium", "high", "extreme"]
+              },
+              "bind": "de_ai_strength"
+            },
+            {
+              "id": "incomplete_level",
+              "label": "不完整程度(0-100)",
+              "control": { "type": "slider", "min": 0, "max": 100, "step": 1 },
+              "bind": "incompleteness.level"
+            },
+            {
+              "id": "anti_structure_level",
+              "label": "反结构强度",
+              "control": { "type": "select", "options": ["off", "light", "strong", "extreme"] },
+              "bind": "anti_structure.level"
+            }
+          ]
+        },
+        {
+          "title": "批量与开头反重复",
+          "fields": [
+            {
+              "id": "unfinished_ratio",
+              "label": "未说完占比(%)",
+              "control": { "type": "slider", "min": 0, "max": 100, "step": 5 },
+              "bind": "batch_rules.unfinished_ratio"
+            },
+            {
+              "id": "awkward_count",
+              "label": "刻意保留别扭条数",
+              "control": { "type": "number", "min": 0, "max": 10, "step": 1 },
+              "bind": "batch_rules.awkward_count"
+            },
+            {
+              "id": "max_time_openers",
+              "label": "时间开头最大条数",
+              "control": { "type": "number", "min": 0, "max": 10, "step": 1 },
+              "bind": "batch_rules.start_diversity.max_time_openers"
+            },
+            {
+              "id": "start_types",
+              "label": "允许的开头类型池",
+              "control": {
+                "type": "multicheck",
+                "options": ["time", "action", "scene", "object", "dialogue_fragment", "thought_interrupt", "body_sensation", "drop_into_middle"]
+              },
+              "bind": "batch_rules.start_diversity.start_types"
+            }
+          ]
+        },
+        {
+          "title": "语言与真实感",
+          "fields": [
+            {
+              "id": "density_level",
+              "label": "语言密度",
+              "control": { "type": "select", "options": ["tight", "balanced", "loose", "sparse"] },
+              "bind": "language.density.level"
+            },
+            {
+              "id": "line_break_style",
+              "label": "断句风格",
+              "control": { "type": "select", "options": ["breath_only", "emotion_only", "mixed", "minimal_breaks", "random_like_human"] },
+              "bind": "language.line_break.style"
+            },
+            {
+              "id": "life_detail_density",
+              "label": "生活细节密度",
+              "control": { "type": "select", "options": ["low", "medium", "high"] },
+              "bind": "language.life_words_first.life_detail_density"
+            },
+            {
+              "id": "preferred_detail_types",
+              "label": "偏好的细节类型",
+              "control": {
+                "type": "multicheck",
+                "options": ["time_fragments", "objects", "small_actions", "space", "weather", "sounds_light", "commute", "desk_work", "body_sensation"]
+              },
+              "bind": "language.life_words_first.preferred_detail_types"
+            }
+          ]
+        },
+        {
+          "title": "输出结构（平台适配）",
+          "fields": [
+            {
+              "id": "platform_type",
+              "label": "平台类型",
+              "control": { "type": "select", "options": ["xiaohongshu", "moments", "weibo", "douyin_copy", "general"] },
+              "bind": "output_packaging.platform_type"
+            },
+            {
+              "id": "blocks",
+              "label": "输出模块组合",
+              "control": { "type": "multicheck", "options": ["main_title", "sub_title", "body_content", "hashtags"] },
+              "bind": "output_packaging.blocks"
+            }
+          ]
+        }
+      ]
+    },
+
+    "tuning": {
+      "sections": [
+        {
+          "title": "内容调节（最高标准）",
+          "subtitle": "常规留空；只有当你必须强行改变口吻/禁区/规则时才写。它会覆盖 baseline 和客户信息。",
+          "fields": [
+            {
+              "id": "override_text",
+              "label": "内容调节（留空=不覆盖）",
+              "control": { "type": "textarea", "rows": 10, "placeholder": "例：更冷更短、禁止出现任何引导、不要写标题、hashtags 全关、不要出现‘本质是’…（写最硬的约束）" },
+              "bind": "override_text"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
 
