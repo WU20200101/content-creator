@@ -19,7 +19,7 @@ body {
   margin:14px 0;
 }
 
-textarea, input {
+textarea, input, select {
   width:100%;
   padding:10px;
   border-radius:10px;
@@ -27,6 +27,11 @@ textarea, input {
   border:1px solid #243164;
   color:#fff;
   margin-top:6px;
+  box-sizing: border-box;
+}
+
+select {
+  appearance: auto;
 }
 
 button {
