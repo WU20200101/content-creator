@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Content-Creator Admin</title>
+<link rel="stylesheet" href="admin.css">
+</head>
+
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>Content-Creator Admin</h1>
+  <p>Customer → Baseline → Tuning → Prompt Preview → Worker</p>
+</header>
+
+<section class="card">
+  <h2>连接 Worker</h2>
+  <input id="workerUrl" placeholder="Worker URL">
+  <input id="token" placeholder="ADMIN_TOKEN" type="password">
+  <button id="saveConn">保存</button>
+</section>
+
+<div class="grid">
+
+  <!-- LEFT -->
+  <section class="panel">
+    <h2>客户信息（User Profile）</h2>
+    <textarea id="userProfile" placeholder="JSON 客户信息"></textarea>
+  </section>
+
+  <!-- RIGHT -->
+  <section class="panel">
+    <h2>Baseline（规则参数）</h2>
+    <button id="loadSchema">加载 Baseline Schema</button>
+    <div id="baselineMount"></div>
+
+    <h2 style="margin-top:18px;">内容调节（最高优先级）</h2>
+    <textarea id="overrideText" placeholder="这里写人工调节规则（最高优先级覆盖 baseline 和客户信息）"></textarea>
+  </section>
+
+</div>
+
+<section class="card">
+  <h2>Prompt Preview（发送 Worker / AI 前最终检查）</h2>
+  <button id="previewPrompt">生成 Prompt</button>
+  <pre id="promptPreview"></pre>
+</section>
+
+<section class="card">
+  <h2>Prompt Presets（保存 / 复用）</h2>
+  <input id="presetName" placeholder="预设名称">
+  <button id="savePreset">保存预设</button>
+  <button id="loadPresets">刷新预设</button>
+  <div id="presetList"></div>
+</section>
+
+<section class="card">
+  <h2>生成内容</h2>
+  <button id="generate">发送 Worker → OpenAI</button>
+  <pre id="output"></pre>
+</section>
+
+</div>
+
+<script src="admin.js"></script>
+</body>
+</html>
