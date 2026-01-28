@@ -168,3 +168,41 @@ body{
   overflow-y: auto;
   padding-right: 8px;
 }
+
+.left-panel {
+  position: sticky;
+  top: 96px;
+  height: fit-content;
+}
+
+body {
+  background: linear-gradient(180deg, #f6f9ff 0%, #f9fbff 100%);
+}
+
+.card {
+  background: rgba(255,255,255,0.92);
+  border: 1px solid #e6eeff;
+  box-shadow: 0 8px 24px rgba(60,100,200,0.04);
+}
+
+.section-title {
+  color: #2f6bff;
+  font-weight: 600;
+}
+
+input, textarea, select {
+  background: #f8fbff;
+  border: 1px solid #dbe7ff;
+}
+
+input:focus, textarea:focus {
+  border-color: #5b8cff;
+  box-shadow: 0 0 0 3px rgba(91,140,255,0.12);
+}
+
+button.primary {
+  background: linear-gradient(180deg, #4f8cff, #3b76ff);
+  color: white;
+  border-radius: 10px;
+}
+
