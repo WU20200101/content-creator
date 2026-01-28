@@ -4,52 +4,65 @@ const tokenEl = document.getElementById("token");
 const outputEl = document.getElementById("output");
 const jobsEl = document.getElementById("jobs");
 const userProfileEl = document.getElementById("userProfile");
-
-function mustEl(id) {
-  const el = document.getElementById(id);
-  if (!el) throw new Error(`Missing element #${id} in admin.html`);
-  return el;
-}
-
-const baselineMount = mustEl("baselineMount");
+const baselineMount = document.getElementById("baselineMount");
+const baselineMeta = document.getElementById("baselineMeta");
+const connStatus = document.getElementById("connStatus");
 
 // -------------------- Utils --------------------
 function normBase(url) {
   return String(url || "").trim().replace(/\/+$/, "");
 }
-
 function authHeaders() {
   const t = String(tokenEl.value || "").trim();
   return t ? { Authorization: "Bearer " + t } : {};
 }
-
-function setStatus(text) {
-  outputEl.textContent = text || "";
-}
+function setOutput(text) { outputEl.textContent = text || ""; }
+function setConn(text) { connStatus.textContent = text || ""; }
+function setMeta(text) { baselineMeta.textContent = text || ""; }
 
 function safeJsonParse(str, fallback = null) {
   try { return JSON.parse(str); } catch { return fallback; }
+}
+
+function now() {
+  return new Date().toLocaleString();
 }
 
 // -------------------- Persist conn --------------------
 document.getElementById("saveConn").onclick = () => {
   localStorage.setItem("cc_url", workerUrlEl.value);
   localStorage.setItem("cc_token", tokenEl.value);
-  alert("已保存");
+  setConn("已保存 · " + now());
 };
 
 workerUrlEl.value = localStorage.getItem("cc_url") || "";
 tokenEl.value = localStorage.getItem("cc_token") || "";
 
+// -------------------- Ping --------------------
+document.getElementById("ping").onclick = async () => {
+  setConn("Ping…");
+  const base = normBase(workerUrlEl.value);
+  if (!base) { setConn("Worker URL 为空"); return; }
+
+  try {
+    const res = await fetch(base + "/", { method:"GET" });
+    const txt = await res.text();
+    setConn(`Ping ${res.status}: ${txt}`);
+  } catch (e) {
+    setConn("Ping failed: " + String(e?.message || e));
+  }
+};
+
 // -------------------- Load UI Schema --------------------
 document.getElementById("loadSchema").onclick = async () => {
-  setStatus("");
+  setOutput("");
+  setMeta("");
   baselineMount.innerHTML = "加载中…";
 
   const base = normBase(workerUrlEl.value);
   if (!base) {
     baselineMount.innerHTML = "";
-    setStatus("Worker URL 为空");
+    setOutput("Worker URL 为空");
     return;
   }
 
@@ -62,93 +75,88 @@ document.getElementById("loadSchema").onclick = async () => {
     const text = await res.text();
     if (!res.ok) {
       baselineMount.innerHTML = "";
-      setStatus(`UI schema load failed: ${res.status}\n${text}`);
+      setOutput(`UI schema load failed: ${res.status}\n${text}`);
       return;
     }
 
     const ui = safeJsonParse(text);
     if (!ui) {
       baselineMount.innerHTML = "";
-      setStatus(`UI schema JSON parse failed\n${text.slice(0, 1000)}`);
+      setOutput(`UI schema JSON parse failed\n${text.slice(0, 1000)}`);
       return;
     }
 
     renderBaselineUI(ui);
-    setStatus("Schema 已加载并渲染");
+    setMeta(`ui_schema_version: ${ui.ui_schema_version || "-"} · sections: ${(ui.sections || []).length}`);
+    setOutput("Schema 已加载并渲染");
   } catch (e) {
     baselineMount.innerHTML = "";
-    setStatus("UI schema fetch failed: " + String(e?.message || e));
+    setOutput("UI schema fetch failed: " + String(e?.message || e));
   }
 };
 
-// -------------------- Render Baseline UI --------------------
+// -------------------- Render --------------------
 function renderBaselineUI(ui) {
   baselineMount.innerHTML = "";
 
-  const header = document.createElement("div");
-  header.style.marginBottom = "10px";
-  header.innerHTML = `<div style="opacity:.85">UI: <b>${ui.ui_schema_version || "-"}</b></div>`;
-  baselineMount.appendChild(header);
-
   (ui.sections || []).forEach(section => {
-    const card = document.createElement("div");
-    card.className = "card";
-    card.style.marginTop = "12px";
+    const sec = document.createElement("div");
+    sec.className = "section";
 
-    const h = document.createElement("h3");
-    h.textContent = section.title || section.section_id || "Section";
-    card.appendChild(h);
+    const t = document.createElement("div");
+    t.className = "section-title";
+    t.textContent = section.title || section.section_id || "Section";
+    sec.appendChild(t);
 
     if (section.subtitle) {
       const sub = document.createElement("div");
-      sub.style.opacity = ".75";
-      sub.style.margin = "6px 0 12px";
+      sub.className = "section-sub";
       sub.textContent = section.subtitle;
-      card.appendChild(sub);
+      sec.appendChild(sub);
     }
 
     (section.fields || []).forEach(field => {
-      card.appendChild(renderField(field));
+      sec.appendChild(renderField(field));
     });
 
-    baselineMount.appendChild(card);
+    baselineMount.appendChild(sec);
   });
 }
 
 function renderField(field) {
   const wrap = document.createElement("div");
-  wrap.style.margin = "10px 0";
+  wrap.className = "field";
 
   const label = document.createElement("div");
-  label.style.fontWeight = "600";
+  label.className = "f-label";
   label.textContent = field.label || field.field_id || "field";
   wrap.appendChild(label);
 
   if (field.help) {
     const help = document.createElement("div");
-    help.style.opacity = ".7";
-    help.style.fontSize = "12px";
-    help.style.marginTop = "4px";
+    help.className = "f-help";
     help.textContent = field.help;
     wrap.appendChild(help);
   }
+
+  const ctrlWrap = document.createElement("div");
+  ctrlWrap.className = "ctrl";
+  wrap.appendChild(ctrlWrap);
 
   const ctrl = field.control || {};
   const bindPath = field.bind?.path;
   if (!bindPath) {
     const warn = document.createElement("div");
-    warn.style.color = "#ffcc66";
+    warn.style.color = "#b45309";
     warn.textContent = "⚠ bind.path missing";
-    wrap.appendChild(warn);
+    ctrlWrap.appendChild(warn);
     return wrap;
   }
 
   let el;
 
-  // select
   if (ctrl.type === "select") {
     el = document.createElement("select");
-    el.style.width = "100%";
     (ctrl.options || []).forEach(opt => {
       const o = document.createElement("option");
       o.value = String(opt.value);
@@ -161,12 +169,9 @@ function renderField(field) {
     el.dataset.kind = "string";
   }
 
-  // slider
   else if (ctrl.type === "slider") {
     const row = document.createElement("div");
-    row.style.display = "flex";
-    row.style.alignItems = "center";
-    row.style.gap = "10px";
+    row.className = "slider-row";
 
     el = document.createElement("input");
     el.type = "range";
@@ -174,19 +179,21 @@ function renderField(field) {
     el.max = ctrl.max ?? 100;
     el.step = ctrl.step ?? 1;
     el.value = field.default ?? el.min;
+    el.dataset.kind = "number";
 
-    const val = document.createElement("span");
-    val.textContent = el.value;
-    el.oninput = () => (val.textContent = el.value);
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = el.value;
+    el.oninput = () => (badge.textContent = el.value);
 
     row.appendChild(el);
-    row.appendChild(val);
-    wrap.appendChild(row);
+    row.appendChild(badge);
+    ctrlWrap.appendChild(row);
 
-    el.dataset.kind = "number";
+    el.dataset.path = bindPath;
+    return wrap;
   }
 
-  // number
   else if (ctrl.type === "number") {
     el = document.createElement("input");
     el.type = "number";
@@ -197,7 +204,6 @@ function renderField(field) {
     el.dataset.kind = "number";
   }
 
-  // switch
   else if (ctrl.type === "switch") {
     el = document.createElement("input");
     el.type = "checkbox";
@@ -205,14 +211,14 @@ function renderField(field) {
     el.dataset.kind = "boolean";
   }
 
-  // multicheck
   else if (ctrl.type === "multicheck") {
     el = document.createElement("div");
     el.dataset.kind = "array";
+
     (ctrl.options || []).forEach(opt => {
       const row = document.createElement("label");
       row.style.display = "block";
-      row.style.marginTop = "6px";
+      row.style.marginTop = "8px";
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
@@ -227,7 +233,6 @@ function renderField(field) {
     });
   }
 
-  // taglist: comma separated
   else if (ctrl.type === "taglist") {
     el = document.createElement("textarea");
     el.rows = 3;
@@ -236,7 +241,6 @@ function renderField(field) {
     el.dataset.kind = "taglist";
   }
 
-  // kv_percent / json
   else if (ctrl.type === "kv_percent") {
     el = document.createElement("textarea");
     el.rows = 4;
@@ -244,7 +248,6 @@ function renderField(field) {
     el.dataset.kind = "json";
   }
 
-  // fallback
   else {
     el = document.createElement("textarea");
     el.rows = 3;
@@ -252,15 +255,8 @@ function renderField(field) {
     el.dataset.kind = "json";
   }
 
-  // bind
   el.dataset.path = bindPath;
-
-  // default styling for controls created here
-  if (el.tagName === "SELECT" || el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
-    el.style.marginTop = "6px";
-  }
-
-  wrap.appendChild(el);
+  ctrlWrap.appendChild(el);
   return wrap;
 }
 
@@ -312,23 +308,21 @@ function setDeep(obj, path, value) {
 
 // -------------------- Generate --------------------
 document.getElementById("generate").onclick = async () => {
-  setStatus("生成中…");
+  setOutput("生成中…");
 
   const base = normBase(workerUrlEl.value);
   if (!base) {
-    setStatus("Worker URL 为空");
+    setOutput("Worker URL 为空");
     return;
   }
 
-  const profileText = userProfileEl.value || "{}";
-  const profile = safeJsonParse(profileText);
+  const profile = safeJsonParse(userProfileEl.value || "{}");
   if (!profile) {
-    setStatus("user_profile 不是合法 JSON");
+    setOutput("user_profile 不是合法 JSON");
     return;
   }
 
   const patch = collectBaselinePatch();
-
   const payload = {
     user_profile: profile,
     tuning: { override_enabled: true, override_patch: patch }
@@ -345,9 +339,9 @@ document.getElementById("generate").onclick = async () => {
     });
 
     const text = await res.text();
-    setStatus(text);
+    setOutput(text);
   } catch (e) {
-    setStatus("generate fetch failed: " + String(e?.message || e));
+    setOutput("generate fetch failed: " + String(e?.message || e));
   }
 };
 
