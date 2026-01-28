@@ -6,24 +6,23 @@
 */
 
 :root{
-  --bg:#f1f3f4;
-  --panel:#ffffff;
-  --line:#e0e3e7;
-  --muted:#5f6368;
-  --text:#202124;
+  --bg:#EEF2F7;
+  --surface:#FFFFFF;
+  --surface2:#F7F9FC;
+  --text:#1F2937;
+  --muted:#6B7280;
+  --line:#D9E0EA;
 
-  --primary:#1a73e8;     /* Google blue */
-  --primary-2:#185abc;
-  --danger:#d93025;
+  --primary:#1A73E8;          /* Google blue */
+  --primarySoft:#E8F0FE;
+  --danger:#D93025;
 
-  --shadow: 0 1px 2px rgba(60,64,67,.30), 0 1px 3px rgba(60,64,67,.15);
+  --radius: 10px;             /* smaller */
+  --radiusLg: 12px;
+  --shadow: 0 2px 10px rgba(16,24,40,.08), 0 1px 2px rgba(16,24,40,.06);
 
-  --radius:10px;
-  --radius2:8px;
-
-  --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-          Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-  --topbar-h:56px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+  --sans: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
 }
 
 *{ box-sizing:border-box; }
@@ -230,4 +229,86 @@ textarea.mono{
   .workgrid{ grid-template-columns: 1fr; }
   .previewgrid{ grid-template-columns: 1fr; }
   .leftcol, .rightcol{ overflow:visible; }
+}
+
+
+/* --- Layout fix: keep LEFT/RIGHT like Apple layout --- */
+html, body { height:100%; }
+body{ background: var(--bg); color: var(--text); overflow:hidden; }
+
+.app{
+  height:100vh;
+  display:flex;
+  flex-direction:column;
+}
+
+.main{
+  flex:1;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  padding: 14px 16px 16px 16px;
+  gap: 14px;
+}
+
+.layout{
+  flex:1;
+  min-height:0;
+  display:grid;
+  grid-template-columns: 420px 1fr;
+  gap: 14px;
+  align-items:stretch;
+}
+
+/* left = scroll inside */
+.card--left{
+  min-height:0;
+  overflow:auto;
+}
+
+/* right = scroll inside */
+.rightcol{
+  min-height:0;
+  overflow:hidden;
+}
+.rightScroll{
+  height:100%;
+  overflow:auto;
+  padding-right: 8px; /* room for scrollbar */
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+
+/* Reduce “too white” feel */
+.card{
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radiusLg);
+  box-shadow: var(--shadow);
+}
+.appbar{
+  border-bottom:1px solid var(--line);
+  background: linear-gradient(180deg, #FFFFFF, #F7F9FC);
+}
+.btn-primary{
+  background: var(--primary);
+}
+.tab.active{
+  background: var(--primarySoft);
+  color: var(--primary);
+  border-color: rgba(26,115,232,.25);
+}
+input:focus, textarea:focus, select:focus{
+  outline:none;
+  border-color: rgba(26,115,232,.45);
+  box-shadow: 0 0 0 4px rgba(26,115,232,.12);
+}
+
+/* responsive: stack when narrow */
+@media (max-width: 1100px){
+  body{ overflow:auto; }
+  .layout{ grid-template-columns: 1fr; }
+  .rightcol{ overflow:visible; }
+  .rightScroll{ overflow:visible; padding-right:0; }
 }
