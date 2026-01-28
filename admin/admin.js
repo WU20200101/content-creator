@@ -1,616 +1,546 @@
-// -------------------- DOM --------------------
-const workerUrlEl = document.getElementById("workerUrl");
-const tokenEl = document.getElementById("token");
-const outputEl = document.getElementById("output");
-const jobsEl = document.getElementById("jobs");
+/* content-creator admin v2
+   - fixes "Identifier already declared" by guarding double-load
+   - renders 3 modules: user_profile (left), baseline (right), tuning (right)
+   - prompt preview before sending
+   - prompt presets CRUD in localStorage
+*/
 
-const baselineMount = document.getElementById("baselineMount");
-const baselineMeta = document.getElementById("baselineMeta");
-const connStatus = document.getElementById("connStatus");
+(function () {
+  // 防止脚本被重复加载导致 const/let 重复声明
+  if (window.__CC_ADMIN_V2_LOADED__) return;
+  window.__CC_ADMIN_V2_LOADED__ = true;
 
-const userProfileMount = document.getElementById("userProfileMount");
-const userProfileJsonEl = document.getElementById("userProfileJson");
+  const $ = (sel) => document.querySelector(sel);
 
-// -------------------- Admin Schema (embedded) --------------------
-// 你发的 JSON 太大，这里只嵌入 “user_form_schema.properties” 相关字段即可。
-// （我们只做 user_profile 表单，baseline UI 仍然从 /api/ui/baseline 取）
-const USER_PROFILE_SCHEMA = {
-  module_id: "user_profile",
-  title: "客户信息（可扩展）",
-  type: "object",
-  required: ["platform", "content_count", "word_count_range"],
-  properties: {
-    platform: { type: "string", title: "平台", enum: ["xiaohongshu","moments","weibo","douyin_copy","general"] },
-    content_count: { type: "integer", title: "内容数量", minimum: 1, maximum: 200, default: 10 },
-    word_count_range: {
-      type: "object",
-      title: "单条字数范围",
-      required: ["min","max"],
-      properties: {
-        min: { type: "integer", minimum: 50, maximum: 2000, default: 300 },
-        max: { type: "integer", minimum: 50, maximum: 2000, default: 500 }
-      }
+  const state = {
+    schemas: null,
+    ui: null,
+    data: {
+      user_profile: {},
+      baseline: {},
+      tuning: {}
     },
-    age_band: { type: "string", title: "客户年龄段", enum: ["18-25","26-30","31-35","36-40","40+"], default: "26-30" },
-    education: { type: "string", title: "受教育程度", enum: ["high_school","college","bachelor","master","phd"], default: "bachelor" },
-    account_age: { type: "string", title: "小红书运营时长", enum: ["<1m","1m","3m","6m","12m","24m+"], default: "3m" },
-    creator_positioning: { type: "string", title: "个人定位", maxLength: 60, default: "" },
-    keywords: { type: "array", title: "关键词", items: { type: "string", maxLength: 20 }, maxItems: 30, default: [] },
-    target_audience: {
-      type: "object",
-      title: "面向受众",
-      properties: {
-        gender: { type: "string", enum: ["all","female","male"], default: "all" },
-        age_band: { type: "string", enum: ["18-25","20-30","25-35","30-40","40+"], default: "20-30" },
-        interest: { type: "string", title: "兴趣/领域", maxLength: 40, default: "" }
-      }
-    },
-    tone_notes: { type: "string", title: "客户补充要求（自由文本）", maxLength: 800, default: "" },
-    future_monetization: {
-      type: "object",
-      title: "未来变现方向（可选）",
-      properties: {
-        might_sell_products: { type: "boolean", default: false },
-        product_types: { type: "array", items: { type: "string", maxLength: 20 }, default: [] },
-        current_stage: { type: "string", enum: ["no_monetization","account_warming","soft_hint_only","lightly_promote","active_sales"], default: "account_warming" }
-      }
-    }
-  }
-};
-
-// -------------------- Utils --------------------
-function normBase(url) {
-  return String(url || "").trim().replace(/\/+$/, "");
-}
-function authHeaders() {
-  const t = String(tokenEl.value || "").trim();
-  return t ? { Authorization: "Bearer " + t } : {};
-}
-function setOutput(text) { outputEl.textContent = text || ""; }
-function setConn(text) { connStatus.textContent = text || ""; }
-function setMeta(text) { baselineMeta.textContent = text || ""; }
-
-function safeJsonParse(str, fallback = null) {
-  try { return JSON.parse(str); } catch { return fallback; }
-}
-function now() { return new Date().toLocaleString(); }
-
-function el(tag, attrs = {}, children = []) {
-  const n = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
-    if (k === "className") n.className = v;
-    else if (k === "text") n.textContent = v;
-    else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v);
-    else n.setAttribute(k, v);
-  }
-  (Array.isArray(children) ? children : [children]).forEach(c => {
-    if (c == null) return;
-    if (typeof c === "string") n.appendChild(document.createTextNode(c));
-    else n.appendChild(c);
-  });
-  return n;
-}
-
-// -------------------- Persist conn --------------------
-document.getElementById("saveConn").onclick = () => {
-  localStorage.setItem("cc_url", workerUrlEl.value);
-  localStorage.setItem("cc_token", tokenEl.value);
-  setConn("已保存 · " + now());
-};
-
-workerUrlEl.value = localStorage.getItem("cc_url") || "";
-tokenEl.value = localStorage.getItem("cc_token") || "";
-
-// -------------------- Ping --------------------
-document.getElementById("ping").onclick = async () => {
-  setConn("Ping…");
-  const base = normBase(workerUrlEl.value);
-  if (!base) { setConn("Worker URL 为空"); return; }
-
-  try {
-    const res = await fetch(base + "/", { method:"GET" });
-    const txt = await res.text();
-    setConn(`Ping ${res.status}: ${txt}`);
-  } catch (e) {
-    setConn("Ping failed: " + String(e?.message || e));
-  }
-};
-
-// -------------------- USER PROFILE FORM --------------------
-renderUserProfileForm(USER_PROFILE_SCHEMA);
-syncUserProfileJson(); // init
-
-function renderUserProfileForm(schema) {
-  userProfileMount.innerHTML = "";
-
-  // helper small sections
-  const box = el("div", { });
-
-  // platform
-  box.appendChild(renderFieldFromSchema("platform", schema.properties.platform, "platform"));
-
-  // content_count
-  box.appendChild(renderFieldFromSchema("content_count", schema.properties.content_count, "content_count"));
-
-  // word_count_range (min/max)
-  box.appendChild(el("div", { className: "field" }, [
-    el("div", { className: "f-label", text: schema.properties.word_count_range.title || "字数范围" }),
-    el("div", { className: "ctrl" }, [
-      el("div", { className: "row" }, [
-        renderInlineNumber("word_count_range.min", "min", schema.properties.word_count_range.properties.min),
-        renderInlineNumber("word_count_range.max", "max", schema.properties.word_count_range.properties.max)
-      ])
-    ])
-  ]));
-
-  // rest
-  const keys = [
-    "age_band","education","account_age","creator_positioning","keywords",
-    "target_audience.gender","target_audience.age_band","target_audience.interest",
-    "tone_notes",
-    "future_monetization.might_sell_products","future_monetization.product_types","future_monetization.current_stage"
-  ];
-
-  keys.forEach(path => {
-    const { prop, title } = resolveSchemaPath(schema, path);
-    if (!prop) return;
-    box.appendChild(renderFieldFromSchema(path, prop, title || path));
-  });
-
-  // actions
-  const row = el("div", { className: "row" }, [
-    el("button", { className: "btn", id: "resetUserProfile", type: "button", text: "重置为默认" }),
-    el("button", { className: "btn btn-ghost", id: "copyUserProfile", type: "button", text: "复制 JSON" })
-  ]);
-
-  userProfileMount.appendChild(box);
-  userProfileMount.appendChild(row);
-
-  document.getElementById("resetUserProfile").onclick = () => {
-    // re-render resets defaults
-    renderUserProfileForm(USER_PROFILE_SCHEMA);
-    syncUserProfileJson();
+    selectedPresetId: null
   };
 
-  document.getElementById("copyUserProfile").onclick = async () => {
+  // ---------- utils ----------
+  function deepClone(obj) {
+    return JSON.parse(JSON.stringify(obj));
+  }
+
+  function isObject(v) {
+    return v && typeof v === "object" && !Array.isArray(v);
+  }
+
+  function deepMerge(a, b) {
+    // a <- b
+    if (!isObject(a) || !isObject(b)) return deepClone(b);
+    const out = deepClone(a);
+    for (const k of Object.keys(b)) {
+      const bv = b[k];
+      if (isObject(bv) && isObject(out[k])) out[k] = deepMerge(out[k], bv);
+      else out[k] = deepClone(bv);
+    }
+    return out;
+  }
+
+  function getByPath(obj, path) {
+    const parts = path.split(".");
+    let cur = obj;
+    for (const p of parts) {
+      if (cur == null) return undefined;
+      cur = cur[p];
+    }
+    return cur;
+  }
+
+  function setByPath(obj, path, value) {
+    const parts = path.split(".");
+    let cur = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts[i];
+      if (!isObject(cur[p])) cur[p] = {};
+      cur = cur[p];
+    }
+    cur[parts[parts.length - 1]] = value;
+  }
+
+  function nowISO() {
+    const d = new Date();
+    return d.toISOString();
+  }
+
+  function formatTime(iso) {
     try {
-      await navigator.clipboard.writeText(userProfileJsonEl.value || "");
-      setConn("已复制 user_profile JSON");
+      const d = new Date(iso);
+      return d.toLocaleString();
     } catch {
-      setConn("复制失败（浏览器权限）");
-    }
-  };
-
-  // listen changes
-  userProfileMount.addEventListener("input", syncUserProfileJson);
-  userProfileMount.addEventListener("change", syncUserProfileJson);
-}
-
-function resolveSchemaPath(rootSchema, path) {
-  const parts = String(path).split(".");
-  let cur = rootSchema;
-  let lastTitle = "";
-  for (const p of parts) {
-    if (!cur) return { prop: null, title: "" };
-    if (cur.type === "object" && cur.properties && cur.properties[p]) {
-      cur = cur.properties[p];
-      lastTitle = cur.title || p;
-    } else {
-      return { prop: null, title: "" };
+      return iso;
     }
   }
-  return { prop: cur, title: lastTitle };
-}
 
-function renderInlineNumber(dataPath, labelText, prop) {
-  const wrap = el("div", { style: "flex:1" }, [
-    el("div", { className: "hint", text: labelText }),
-    (() => {
-      const inp = el("input", {
-        type: "number",
-        value: prop.default ?? "",
-        min: prop.minimum ?? "",
-        max: prop.maximum ?? "",
-        "data-upath": dataPath,
-        "data-ukind": "number"
+  // ---------- schemas ----------
+  async function loadSchemas() {
+    const [schemaRes, uiRes] = await Promise.all([
+      fetch("./schemas/admin_schema.json", { cache: "no-store" }),
+      fetch("./schemas/ui_schema.json", { cache: "no-store" })
+    ]);
+    if (!schemaRes.ok) throw new Error("无法加载 admin_schema.json");
+    if (!uiRes.ok) throw new Error("无法加载 ui_schema.json");
+    state.schemas = await schemaRes.json();
+    state.ui = await uiRes.json();
+
+    // init defaults
+    state.data.user_profile = deepClone(state.schemas.modules.user_profile.default || {});
+    state.data.baseline = deepClone(state.schemas.modules.baseline.default || {});
+    state.data.tuning = deepClone(state.schemas.modules.tuning.default || {});
+
+    // ensure required core values exist
+    if (!state.data.user_profile.word_count_range) state.data.user_profile.word_count_range = { min: 300, max: 500 };
+  }
+
+  // ---------- render controls ----------
+  function el(tag, attrs = {}, children = []) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") node.className = v;
+      else if (k === "text") node.textContent = v;
+      else if (k.startsWith("on") && typeof v === "function") node.addEventListener(k.slice(2), v);
+      else node.setAttribute(k, v);
+    }
+    for (const c of children) node.appendChild(c);
+    return node;
+  }
+
+  function renderSection(title, subtitle) {
+    const box = el("div", { class: "section" });
+    box.appendChild(el("h3", { text: title }));
+    if (subtitle) box.appendChild(el("div", { class: "sub", text: subtitle }));
+    return box;
+  }
+
+  function renderField(moduleKey, fieldDef) {
+    const wrap = el("div", { class: "field" });
+    wrap.appendChild(el("label", { text: fieldDef.label }));
+
+    const bindPath = fieldDef.bind;
+    const basePath = moduleKey + "." + bindPath;
+
+    const ctl = fieldDef.control || { type: "text" };
+    let input;
+
+    const readValue = () => getByPath(state.data[moduleKey], bindPath);
+    const writeValue = (val) => {
+      setByPath(state.data[moduleKey], bindPath, val);
+      // auto refresh prompt preview if already built once
+      // (lightweight: do nothing; user can click refresh)
+    };
+
+    if (ctl.type === "select") {
+      input = el("select");
+      (ctl.options || []).forEach((opt) => {
+        const val = typeof opt === "string" ? opt : opt.value;
+        const lab = typeof opt === "string" ? opt : (opt.label ?? opt.value);
+        input.appendChild(el("option", { value: String(val), text: lab }));
       });
-      return inp;
-    })()
-  ]);
-  return wrap;
-}
+      input.value = String(readValue() ?? "");
+      input.addEventListener("change", () => writeValue(input.value));
+    } else if (ctl.type === "number") {
+      input = el("input", { type: "number" });
+      if (ctl.min != null) input.min = String(ctl.min);
+      if (ctl.max != null) input.max = String(ctl.max);
+      if (ctl.step != null) input.step = String(ctl.step);
+      input.value = String(readValue() ?? 0);
+      input.addEventListener("change", () => writeValue(Number(input.value)));
+    } else if (ctl.type === "slider") {
+      const row = el("div", { class: "control-inline" });
+      input = el("input", { type: "range" });
+      input.min = String(ctl.min ?? 0);
+      input.max = String(ctl.max ?? 100);
+      input.step = String(ctl.step ?? 1);
+      input.value = String(readValue() ?? ctl.min ?? 0);
 
-function renderFieldFromSchema(path, prop, labelFallback) {
-  const wrap = el("div", { className: "field" });
-  wrap.appendChild(el("div", { className: "f-label", text: prop.title || labelFallback }));
+      const valBox = el("div", { class: "hint", text: String(input.value) });
+      input.addEventListener("input", () => (valBox.textContent = String(input.value)));
+      input.addEventListener("change", () => writeValue(Number(input.value)));
 
-  if (prop.description) {
-    wrap.appendChild(el("div", { className: "f-help", text: prop.description }));
-  }
+      row.appendChild(input);
+      row.appendChild(valBox);
+      wrap.appendChild(row);
+      return wrap;
+    } else if (ctl.type === "switch") {
+      input = el("input", { type: "checkbox" });
+      input.checked = Boolean(readValue());
+      input.addEventListener("change", () => writeValue(Boolean(input.checked)));
+    } else if (ctl.type === "textarea") {
+      input = el("textarea", { rows: String(ctl.rows ?? 6), placeholder: ctl.placeholder ?? "" });
+      input.value = String(readValue() ?? "");
+      input.addEventListener("change", () => writeValue(input.value));
+    } else if (ctl.type === "taglist") {
+      const container = el("div");
+      const tagsWrap = el("div", { class: "pills" });
+      const inp = el("input", { type: "text", placeholder: ctl.placeholder ?? "回车添加" });
 
-  const ctrl = el("div", { className: "ctrl" });
+      function redraw() {
+        tagsWrap.innerHTML = "";
+        const arr = readValue() || [];
+        arr.forEach((t, idx) => {
+          const pill = el("span", { class: "pill", text: t });
+          pill.title = "点击删除";
+          pill.addEventListener("click", () => {
+            const next = arr.slice();
+            next.splice(idx, 1);
+            writeValue(next);
+            redraw();
+          });
+          tagsWrap.appendChild(pill);
+        });
+      }
 
-  // enum -> select
-  if (prop.enum) {
-    const sel = el("select", { "data-upath": path, "data-ukind": "string" });
-    prop.enum.forEach(v => sel.appendChild(el("option", { value: v, text: v })));
-    sel.value = prop.default ?? prop.enum[0];
-    ctrl.appendChild(sel);
-  }
-  // boolean -> checkbox
-  else if (prop.type === "boolean") {
-    const cb = el("input", { type:"checkbox", "data-upath": path, "data-ukind":"boolean" });
-    cb.checked = !!prop.default;
-    ctrl.appendChild(cb);
-  }
-  // integer/number -> number input
-  else if (prop.type === "integer" || prop.type === "number") {
-    const inp = el("input", {
-      type:"number",
-      value: prop.default ?? "",
-      min: prop.minimum ?? "",
-      max: prop.maximum ?? "",
-      "data-upath": path,
-      "data-ukind":"number"
-    });
-    ctrl.appendChild(inp);
-  }
-  // array -> taglist
-  else if (prop.type === "array") {
-    const ta = el("textarea", {
-      rows:"2",
-      placeholder:"用逗号分隔，例如：关键词1, 关键词2",
-      "data-upath": path,
-      "data-ukind":"taglist"
-    });
-    const def = Array.isArray(prop.default) ? prop.default : [];
-    ta.value = def.join(", ");
-    ctrl.appendChild(ta);
-  }
-  // string -> textarea (short string also ok)
-  else {
-    const ta = el("textarea", {
-      rows: (prop.maxLength && prop.maxLength <= 80) ? "2" : "4",
-      "data-upath": path,
-      "data-ukind":"string"
-    });
-    ta.value = prop.default ?? "";
-    ctrl.appendChild(ta);
-  }
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const v = inp.value.trim();
+          if (!v) return;
+          const arr = (readValue() || []).slice();
+          if (arr.length >= 30) return;
+          if (!arr.includes(v)) arr.push(v);
+          writeValue(arr);
+          inp.value = "";
+          redraw();
+        }
+      });
 
-  wrap.appendChild(ctrl);
-  return wrap;
-}
+      container.appendChild(tagsWrap);
+      container.appendChild(inp);
+      wrap.appendChild(container);
+      redraw();
+      return wrap;
+    } else if (ctl.type === "multicheck") {
+      const container = el("div");
+      const curArr = Array.isArray(readValue()) ? readValue() : [];
+      const options = ctl.options || [];
 
-function collectUserProfile() {
-  // start from defaults
-  const base = buildDefaultsFromSchema(USER_PROFILE_SCHEMA);
+      options.forEach((opt) => {
+        const val = typeof opt === "string" ? opt : opt.value;
+        const lab = typeof opt === "string" ? opt : (opt.label ?? opt.value);
 
-  // apply current inputs
-  userProfileMount.querySelectorAll("[data-upath]").forEach(node => {
-    const path = node.dataset.upath;
-    const kind = node.dataset.ukind || "string";
-    let value;
+        const row = el("div", { class: "switch-row" });
+        const cb = el("input", { type: "checkbox" });
+        cb.checked = curArr.includes(val);
+        cb.addEventListener("change", () => {
+          const arr = Array.isArray(readValue()) ? readValue().slice() : [];
+          const has = arr.includes(val);
+          if (cb.checked && !has) arr.push(val);
+          if (!cb.checked && has) arr.splice(arr.indexOf(val), 1);
+          writeValue(arr);
+        });
+        row.appendChild(cb);
+        row.appendChild(el("span", { class: "hint", text: lab }));
+        container.appendChild(row);
+      });
 
-    if (kind === "boolean") value = !!node.checked;
-    else if (kind === "number") value = Number(node.value);
-    else if (kind === "taglist") {
-      value = String(node.value || "").split(",").map(s => s.trim()).filter(Boolean);
-    } else value = String(node.value ?? "");
-
-    setDeep(base, path, value);
-  });
-
-  // required safety: ensure word_count_range min/max exist
-  if (!base.word_count_range) base.word_count_range = { min: 300, max: 500 };
-  if (typeof base.word_count_range.min !== "number") base.word_count_range.min = 300;
-  if (typeof base.word_count_range.max !== "number") base.word_count_range.max = 500;
-
-  return base;
-}
-
-function buildDefaultsFromSchema(schema) {
-  if (!schema || schema.type !== "object") return {};
-  const out = {};
-  const props = schema.properties || {};
-  for (const [k, p] of Object.entries(props)) {
-    if (p.type === "object") out[k] = buildDefaultsFromSchema(p);
-    else if (p.type === "array") out[k] = Array.isArray(p.default) ? p.default.slice() : [];
-    else if (p.type === "boolean") out[k] = !!p.default;
-    else if (p.type === "integer" || p.type === "number") out[k] = (p.default != null) ? Number(p.default) : 0;
-    else out[k] = (p.default != null) ? p.default : "";
-  }
-  return out;
-}
-
-function syncUserProfileJson() {
-  const obj = collectUserProfile();
-  userProfileJsonEl.value = JSON.stringify(obj, null, 2);
-}
-
-// -------------------- BASELINE UI (from worker) --------------------
-document.getElementById("loadSchema").onclick = async () => {
-  setOutput("");
-  setMeta("");
-  baselineMount.innerHTML = "加载中…";
-
-  const base = normBase(workerUrlEl.value);
-  if (!base) {
-    baselineMount.innerHTML = "";
-    setOutput("Worker URL 为空");
-    return;
-  }
-
-  try {
-    const res = await fetch(base + "/api/ui/baseline", {
-      method: "GET",
-      headers: { ...authHeaders() }
-    });
-
-    const text = await res.text();
-    if (!res.ok) {
-      baselineMount.innerHTML = "";
-      setOutput(`UI schema load failed: ${res.status}\n${text}`);
-      return;
+      wrap.appendChild(container);
+      return wrap;
+    } else {
+      input = el("input", { type: "text", placeholder: ctl.placeholder ?? "" });
+      input.value = String(readValue() ?? "");
+      if (ctl.maxLength != null) input.maxLength = ctl.maxLength;
+      input.addEventListener("change", () => writeValue(input.value));
     }
 
-    const ui = safeJsonParse(text);
-    if (!ui) {
-      baselineMount.innerHTML = "";
-      setOutput(`UI schema JSON parse failed\n${text.slice(0, 1000)}`);
-      return;
-    }
-
-    renderBaselineUI(ui);
-    setMeta(`ui_schema_version: ${ui.ui_schema_version || "-"} · sections: ${(ui.sections || []).length}`);
-    setOutput("Baseline UI 已加载并渲染");
-  } catch (e) {
-    baselineMount.innerHTML = "";
-    setOutput("UI schema fetch failed: " + String(e?.message || e));
-  }
-};
-
-function renderBaselineUI(ui) {
-  baselineMount.innerHTML = "";
-
-  (ui.sections || []).forEach(section => {
-    const sec = document.createElement("div");
-    sec.className = "section";
-
-    const t = document.createElement("div");
-    t.className = "section-title";
-    t.textContent = section.title || section.section_id || "Section";
-    sec.appendChild(t);
-
-    if (section.subtitle) {
-      const sub = document.createElement("div");
-      sub.className = "section-sub";
-      sub.textContent = section.subtitle;
-      sec.appendChild(sub);
-    }
-
-    (section.fields || []).forEach(field => {
-      sec.appendChild(renderBaselineField(field));
-    });
-
-    baselineMount.appendChild(sec);
-  });
-}
-
-function renderBaselineField(field) {
-  const wrap = document.createElement("div");
-  wrap.className = "field";
-
-  const label = document.createElement("div");
-  label.className = "f-label";
-  label.textContent = field.label || field.field_id || "field";
-  wrap.appendChild(label);
-
-  if (field.help) {
-    const help = document.createElement("div");
-    help.className = "f-help";
-    help.textContent = field.help;
-    wrap.appendChild(help);
-  }
-
-  const ctrlWrap = document.createElement("div");
-  ctrlWrap.className = "ctrl";
-  wrap.appendChild(ctrlWrap);
-
-  const ctrl = field.control || {};
-  const bindPath = field.bind?.path;
-  if (!bindPath) {
-    const warn = document.createElement("div");
-    warn.style.color = "#b45309";
-    warn.textContent = "⚠ bind.path missing";
-    ctrlWrap.appendChild(warn);
+    wrap.appendChild(input);
     return wrap;
   }
 
-  let el;
-
-  if (ctrl.type === "select") {
-    el = document.createElement("select");
-    (ctrl.options || []).forEach(opt => {
-      const o = document.createElement("option");
-      o.value = String(opt.value);
-      o.textContent = opt.label ?? String(opt.value);
-      el.appendChild(o);
-    });
-    el.value = field.default != null ? String(field.default) : String(ctrl.options?.[0]?.value ?? "");
-    el.dataset.kind = "string";
-  }
-
-  else if (ctrl.type === "slider") {
-    const row = document.createElement("div");
-    row.className = "slider-row";
-
-    el = document.createElement("input");
-    el.type = "range";
-    el.min = ctrl.min ?? 0;
-    el.max = ctrl.max ?? 100;
-    el.step = ctrl.step ?? 1;
-    el.value = field.default ?? el.min;
-    el.dataset.kind = "number";
-
-    const badge = document.createElement("span");
-    badge.className = "badge";
-    badge.textContent = el.value;
-    el.oninput = () => (badge.textContent = el.value);
-
-    row.appendChild(el);
-    row.appendChild(badge);
-    ctrlWrap.appendChild(row);
-
-    el.dataset.path = bindPath;
-    return wrap;
-  }
-
-  else if (ctrl.type === "number") {
-    el = document.createElement("input");
-    el.type = "number";
-    el.min = ctrl.min ?? "";
-    el.max = ctrl.max ?? "";
-    el.step = ctrl.step ?? "1";
-    el.value = field.default ?? "";
-    el.dataset.kind = "number";
-  }
-
-  else if (ctrl.type === "switch") {
-    el = document.createElement("input");
-    el.type = "checkbox";
-    el.checked = !!field.default;
-    el.dataset.kind = "boolean";
-  }
-
-  else if (ctrl.type === "multicheck") {
-    el = document.createElement("div");
-    el.dataset.kind = "array";
-
-    (ctrl.options || []).forEach(opt => {
-      const row = document.createElement("label");
-      row.style.display = "block";
-      row.style.marginTop = "8px";
-
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.value = String(opt.value);
-
-      const def = field.default || [];
-      cb.checked = Array.isArray(def) && def.map(String).includes(String(opt.value));
-
-      row.appendChild(cb);
-      row.append(" " + (opt.label ?? opt.value));
-      el.appendChild(row);
+  function renderForm(moduleKey, mountEl, formDef) {
+    mountEl.innerHTML = "";
+    (formDef.sections || []).forEach((sec) => {
+      const sectionBox = renderSection(sec.title, sec.subtitle);
+      (sec.fields || []).forEach((f) => {
+        sectionBox.appendChild(renderField(moduleKey, f));
+      });
+      mountEl.appendChild(sectionBox);
     });
   }
 
-  else if (ctrl.type === "taglist") {
-    el = document.createElement("textarea");
-    el.rows = 3;
-    const def = field.default || [];
-    el.value = Array.isArray(def) ? def.join(", ") : String(def || "");
-    el.dataset.kind = "taglist";
+  // ---------- prompt builder ----------
+  function buildPromptText() {
+    const schema = state.schemas;
+    const sys = schema.prompt_templates.system;
+
+    // merge directives
+    const up = state.data.user_profile;
+    const bl = state.data.baseline;
+    const tn = state.data.tuning;
+
+    const count = up.content_count ?? 10;
+    const minW = up.word_count_range?.min ?? 300;
+    const maxW = up.word_count_range?.max ?? 500;
+
+    const tuningText = (tn.override_text || "").trim();
+    const userTpl = schema.prompt_templates.user
+      .replace("{{USER_PROFILE_JSON}}", JSON.stringify(up, null, 2))
+      .replace("{{BASELINE_JSON}}", JSON.stringify(bl, null, 2))
+      .replace("{{TUNING_OVERRIDE_TEXT}}", tuningText ? tuningText : "（空：不覆盖）")
+      .replace("{{COUNT}}", String(count))
+      .replace("{{MIN_WORDS}}", String(minW))
+      .replace("{{MAX_WORDS}}", String(maxW));
+
+    const final = `### SYSTEM\n${sys}\n\n### USER\n${userTpl}\n`;
+    return final;
   }
 
-  else if (ctrl.type === "kv_percent") {
-    el = document.createElement("textarea");
-    el.rows = 4;
-    el.value = JSON.stringify(field.default || {}, null, 2);
-    el.dataset.kind = "json";
+  // ---------- presets (localStorage) ----------
+  const PRESET_KEY = "cc_admin_prompt_presets_v2";
+
+  function loadPresets() {
+    try {
+      return JSON.parse(localStorage.getItem(PRESET_KEY) || "[]");
+    } catch {
+      return [];
+    }
   }
 
-  else {
-    el = document.createElement("textarea");
-    el.rows = 3;
-    el.value = field.default == null ? "" : JSON.stringify(field.default);
-    el.dataset.kind = "json";
+  function savePresets(list) {
+    localStorage.setItem(PRESET_KEY, JSON.stringify(list));
   }
 
-  el.dataset.path = bindPath;
-  ctrlWrap.appendChild(el);
-  return wrap;
-}
+  function renderPresetList() {
+    const listEl = $("#presetList");
+    const search = ($("#presetSearch").value || "").trim().toLowerCase();
+    const presets = loadPresets();
 
-// -------------------- Collect baseline patch --------------------
-function collectBaselinePatch() {
-  const patch = {};
+    listEl.innerHTML = "";
+    presets
+      .filter((p) => {
+        if (!search) return true;
+        return (p.name || "").toLowerCase().includes(search);
+      })
+      .sort((a, b) => (b.updated_at || "").localeCompare(a.updated_at || ""))
+      .forEach((p) => {
+        const item = el("div", { class: "preset-item" + (state.selectedPresetId === p.id ? " active" : "") });
+        const meta = el("div", { class: "preset-meta" });
+        meta.appendChild(el("div", { class: "preset-title", text: p.name || "(unnamed)" }));
+        meta.appendChild(el("div", { class: "preset-time", text: "更新: " + formatTime(p.updated_at || p.created_at || "") }));
+        item.appendChild(meta);
 
-  baselineMount.querySelectorAll("[data-path]").forEach(node => {
-    const path = node.dataset.path;
-    const kind = node.dataset.kind || "string";
+        const btnLoad = el("button", { class: "btn btn-ghost", text: "载入" });
+        btnLoad.addEventListener("click", (e) => {
+          e.stopPropagation();
+          applyPreset(p.id);
+        });
+        item.appendChild(btnLoad);
 
-    let value;
+        item.addEventListener("click", () => {
+          state.selectedPresetId = p.id;
+          $("#presetName").value = p.name || "";
+          renderPresetList();
+        });
 
-    if (kind === "boolean") value = !!node.checked;
-    else if (kind === "number") value = Number(node.value);
-    else if (kind === "array") value = [...node.querySelectorAll("input[type=checkbox]:checked")].map(i => i.value);
-    else if (kind === "taglist") value = String(node.value || "").split(",").map(s => s.trim()).filter(Boolean);
-    else if (kind === "json") {
-      const v = String(node.value || "");
-      const parsed = safeJsonParse(v);
-      value = parsed == null ? v : parsed;
-    } else value = node.value;
-
-    setDeep(patch, path, value);
-  });
-
-  return patch;
-}
-
-function setDeep(obj, path, value) {
-  const keys = String(path).split(".");
-  let cur = obj;
-  for (let i = 0; i < keys.length - 1; i++) {
-    const k = keys[i];
-    if (!cur[k] || typeof cur[k] !== "object") cur[k] = {};
-    cur = cur[k];
+        listEl.appendChild(item);
+      });
   }
-  cur[keys[keys.length - 1]] = value;
-}
 
-// -------------------- Generate --------------------
-document.getElementById("generate").onclick = async () => {
-  setOutput("生成中…");
+  function applyPreset(id) {
+    const presets = loadPresets();
+    const p = presets.find((x) => x.id === id);
+    if (!p) return;
+    state.selectedPresetId = id;
 
-  const base = normBase(workerUrlEl.value);
-  if (!base) { setOutput("Worker URL 为空"); return; }
+    state.data.user_profile = deepClone(p.data.user_profile || state.data.user_profile);
+    state.data.baseline = deepClone(p.data.baseline || state.data.baseline);
+    state.data.tuning = deepClone(p.data.tuning || state.data.tuning);
 
-  const user_profile = safeJsonParse(userProfileJsonEl.value);
-  if (!user_profile) { setOutput("user_profile JSON 生成失败"); return; }
+    // re-render
+    renderAllForms();
+    $("#presetName").value = p.name || "";
+    $("#promptPreview").textContent = p.data.prompt_text || buildPromptText();
+    renderPresetList();
+  }
 
-  const patch = collectBaselinePatch();
-  const payload = {
-    user_profile,
-    tuning: { override_enabled: true, override_patch: patch }
-  };
+  function upsertPreset(mode) {
+    const name = ($("#presetName").value || "").trim();
+    if (!name) {
+      alert("请先填写预设名称");
+      return;
+    }
+    const presets = loadPresets();
 
-  try {
-    const res = await fetch(base + "/api/generate", {
-      method: "POST",
-      headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+    const payload = {
+      user_profile: deepClone(state.data.user_profile),
+      baseline: deepClone(state.data.baseline),
+      tuning: deepClone(state.data.tuning),
+      prompt_text: buildPromptText()
+    };
+
+    if (mode === "new") {
+      const id = "p_" + Math.random().toString(16).slice(2) + "_" + Date.now();
+      presets.push({
+        id,
+        name,
+        created_at: nowISO(),
+        updated_at: nowISO(),
+        data: payload
+      });
+      state.selectedPresetId = id;
+    } else {
+      if (!state.selectedPresetId) {
+        alert("请先在列表里选中一个预设，再覆盖更新");
+        return;
+      }
+      const idx = presets.findIndex((x) => x.id === state.selectedPresetId);
+      if (idx < 0) return;
+      presets[idx] = {
+        ...presets[idx],
+        name,
+        updated_at: nowISO(),
+        data: payload
+      };
+    }
+
+    savePresets(presets);
+    renderPresetList();
+  }
+
+  function deleteSelectedPreset() {
+    if (!state.selectedPresetId) {
+      alert("请先选中一个预设");
+      return;
+    }
+    const presets = loadPresets();
+    const next = presets.filter((p) => p.id !== state.selectedPresetId);
+    savePresets(next);
+    state.selectedPresetId = null;
+    $("#presetName").value = "";
+    renderPresetList();
+  }
+
+  // ---------- render all ----------
+  function renderAllForms() {
+    renderForm("user_profile", $("#mountUserProfile"), state.ui.forms.user_profile);
+    renderForm("baseline", $("#mountBaseline"), state.ui.forms.baseline);
+    renderForm("tuning", $("#mountTuning"), state.ui.forms.tuning);
+  }
+
+  // ---------- generate ----------
+  async function generate() {
+    const output = $("#outputBox");
+    output.textContent = "";
+
+    const workerUrl = ($("#workerUrl").value || "").trim();
+    const adminKey = ($("#adminKey").value || "").trim();
+    const path = ($("#generatePath").value || "/admin/generate").trim();
+    const previewOnly = $("#previewOnly").checked;
+
+    const promptText = buildPromptText();
+    $("#promptPreview").textContent = promptText;
+
+    if (previewOnly) {
+      output.textContent = "✅ Preview Only 已开启：只生成 Prompt 预览，不发送请求。\n";
+      return;
+    }
+
+    if (!workerUrl) {
+      output.textContent = "❌ 请先填写 Worker Base URL\n";
+      return;
+    }
+
+    const payload = {
+      user_profile: state.data.user_profile,
+      baseline: state.data.baseline,
+      tuning: state.data.tuning,
+      prompt_preview: promptText,
+      meta: {
+        client: "admin_v2",
+        ts: nowISO()
+      }
+    };
+
+    try {
+      const res = await fetch(workerUrl.replace(/\/$/, "") + path, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(adminKey ? { "Authorization": "Bearer " + adminKey } : {})
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const text = await res.text();
+      if (!res.ok) {
+        output.textContent = `❌ 请求失败 (${res.status})\n` + text;
+        return;
+      }
+
+      // 尝试 parse json，失败则直接显示文本
+      try {
+        const json = JSON.parse(text);
+        output.textContent = JSON.stringify(json, null, 2);
+      } catch {
+        output.textContent = text;
+      }
+    } catch (err) {
+      output.textContent = "❌ 网络/请求错误：\n" + String(err);
+    }
+  }
+
+  // ---------- events ----------
+  function bindEvents() {
+    $("#btnReloadSchemas").addEventListener("click", async () => {
+      try {
+        await loadSchemas();
+        renderAllForms();
+        $("#outputBox").textContent = "✅ 已重新加载 schema & 重置默认值\n";
+        $("#promptPreview").textContent = "";
+        renderPresetList();
+      } catch (e) {
+        $("#outputBox").textContent = "❌ Schema 加载失败：\n" + String(e);
+      }
     });
 
-    setOutput(await res.text());
-  } catch (e) {
-    setOutput("generate fetch failed: " + String(e?.message || e));
-  }
-};
-
-// -------------------- Jobs --------------------
-document.getElementById("loadJobs").onclick = async () => {
-  const base = normBase(workerUrlEl.value);
-  if (!base) { jobsEl.textContent = "Worker URL 为空"; return; }
-
-  try {
-    const res = await fetch(base + "/api/jobs", {
-      method: "GET",
-      headers: { ...authHeaders() }
+    $("#btnResetAll").addEventListener("click", async () => {
+      await loadSchemas();
+      renderAllForms();
+      $("#promptPreview").textContent = "";
+      $("#outputBox").textContent = "✅ 已重置为默认值\n";
     });
 
-    jobsEl.textContent = await res.text();
-  } catch (e) {
-    jobsEl.textContent = "jobs fetch failed: " + String(e?.message || e);
+    $("#btnBuildPrompt").addEventListener("click", () => {
+      $("#promptPreview").textContent = buildPromptText();
+    });
+
+    $("#btnCopyPrompt").addEventListener("click", async () => {
+      const txt = $("#promptPreview").textContent || buildPromptText();
+      try {
+        await navigator.clipboard.writeText(txt);
+        $("#outputBox").textContent = "✅ 已复制 Prompt 到剪贴板\n";
+      } catch {
+        $("#outputBox").textContent = "❌ 复制失败（浏览器权限限制）。你可以手动选中复制。\n";
+      }
+    });
+
+    $("#btnGenerate").addEventListener("click", generate);
+
+    $("#presetSearch").addEventListener("input", renderPresetList);
+
+    $("#btnSavePresetNew").addEventListener("click", () => upsertPreset("new"));
+    $("#btnUpdatePreset").addEventListener("click", () => upsertPreset("update"));
+    $("#btnDeletePreset").addEventListener("click", deleteSelectedPreset);
   }
-};
+
+  // ---------- boot ----------
+  async function boot() {
+    try {
+      await loadSchemas();
+      renderAllForms();
+      bindEvents();
+      renderPresetList();
+      $("#outputBox").textContent = "✅ Admin v2 已加载\n";
+    } catch (e) {
+      $("#outputBox").textContent = "❌ 初始化失败：\n" + String(e);
+    }
+  }
+
+  boot();
+})();
