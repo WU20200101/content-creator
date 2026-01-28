@@ -2,8 +2,6 @@ const workerUrl = document.getElementById("workerUrl");
 const token = document.getElementById("token");
 const output = document.getElementById("output");
 const jobs = document.getElementById("jobs");
-
-const baselineMount = document.getElementById("baselineMount"); // 你需要在html里加这个div
 const userProfile = document.getElementById("userProfile");
 
 function mustEl(id) {
@@ -12,8 +10,8 @@ function mustEl(id) {
   return el;
 }
 
-// 用它替换关键元素
 const baselineMount = mustEl("baselineMount");
+
 
 
 document.getElementById("saveConn").onclick = () => {
