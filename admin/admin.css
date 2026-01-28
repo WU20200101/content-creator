@@ -162,3 +162,27 @@ body{
   color:var(--muted);
   font-size:12px;
 }
+
+
+/* --- v2: right column internal scrolling (Baseline + Tuning) --- */
+.layout{
+  align-items: start; /* keep columns aligned to top */
+}
+
+/* Make the right column scroll instead of pushing the whole page down */
+.rightcol{
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  padding-right: 8px;
+  overscroll-behavior: contain;
+}
+
+/* Nicer scrollbar (non-intrusive) */
+.rightcol::-webkit-scrollbar{ width: 10px; }
+.rightcol::-webkit-scrollbar-thumb{
+  background: rgba(17,24,39,.16);
+  border-radius: 10px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.rightcol::-webkit-scrollbar-track{ background: transparent; }
