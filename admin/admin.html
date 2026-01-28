@@ -17,7 +17,7 @@
       </div>
     </div>
     <div class="actions">
-      <button id="loadSchema" class="btn">加载 Schema</button>
+      <button id="loadSchema" class="btn">加载 Baseline UI</button>
       <button id="loadJobs" class="btn btn-ghost">刷新 Jobs</button>
     </div>
   </div>
@@ -25,7 +25,7 @@
   <div class="container">
     <div class="grid">
 
-      <!-- Left: connection + inputs -->
+      <!-- Left -->
       <div class="col">
         <section class="card">
           <div class="card-h">
@@ -49,10 +49,17 @@
 
         <section class="card">
           <div class="card-h">
-            <h2>客户信息</h2>
-            <div class="hint">user_profile JSON（仅做音色调节）</div>
+            <h2>客户信息（user_profile）</h2>
+            <div class="hint">按 schema 生成表单 → 自动产出 JSON</div>
           </div>
-          <textarea id="userProfile" rows="12" spellcheck="false">{}</textarea>
+
+          <!-- mount: user form -->
+          <div id="userProfileMount"></div>
+
+          <div style="margin-top:12px;">
+            <div class="hint" style="margin-bottom:6px;">当前 user_profile JSON（自动生成，可复制）</div>
+            <textarea id="userProfileJson" rows="10" spellcheck="false" readonly></textarea>
+          </div>
         </section>
 
         <section class="card">
@@ -65,12 +72,12 @@
         </section>
       </div>
 
-      <!-- Right: baseline ui + jobs -->
+      <!-- Right -->
       <div class="col">
         <section class="card">
           <div class="card-h">
             <h2>Baseline（规则参数）</h2>
-            <div class="hint">UI schema 渲染区（亮色、可滚动）</div>
+            <div class="hint">来自 /api/ui/baseline</div>
           </div>
           <div id="baselineMeta" class="meta"></div>
           <div id="baselineMount" class="baseline"></div>
