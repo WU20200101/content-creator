@@ -162,3 +162,9 @@ body{
   color:var(--muted);
   font-size:12px;
 }
+
+.right-panel {
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  padding-right: 8px;
+}
