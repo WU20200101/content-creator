@@ -1,0 +1,49 @@
+body {
+  background:#0e1220;
+  color:#eaeefe;
+  font-family: system-ui;
+  margin:0;
+}
+
+.wrap {
+  max-width:1100px;
+  margin:24px auto;
+  padding:16px;
+}
+
+.card {
+  background:#141b34;
+  border:1px solid #243164;
+  border-radius:14px;
+  padding:14px;
+  margin:14px 0;
+}
+
+textarea, input {
+  width:100%;
+  padding:10px;
+  border-radius:10px;
+  background:#0b1025;
+  border:1px solid #243164;
+  color:#fff;
+  margin-top:6px;
+}
+
+button {
+  margin-top:10px;
+  padding:10px 14px;
+  border-radius:12px;
+  border:none;
+  background:#4c7dff;
+  color:white;
+  font-weight:600;
+  cursor:pointer;
+}
+
+pre {
+  background:#0b1025;
+  padding:12px;
+  border-radius:12px;
+  overflow:auto;
+  min-height:120px;
+}
