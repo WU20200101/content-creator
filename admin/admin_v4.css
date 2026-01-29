@@ -260,7 +260,7 @@ body{
 
 /* 右侧编辑面板：限制高度 + 内部滚动 */
 .secEditor{
-  max-height: calc(100vh - 300px); /* 可微调 */
+  max-height: calc(100vh - 320px); /* 可微调 */
   overflow-y: auto;
 }
 
