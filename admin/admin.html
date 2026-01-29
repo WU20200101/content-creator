@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Content-Creator Admin</title>
-  <link rel="stylesheet" href="./admin.css?v=2"/>
+  <title>Content-Creator Admin v3</title>
+  <link rel="stylesheet" href="./admin_v3.css?v=3"/>
 </head>
 <body>
   <header class="topbar">
@@ -14,7 +14,10 @@
     </div>
 
     <div class="topbar__right">
-      <button class="btn btn--ghost" id="btnReloadSchemas" title="重新加载 R2 schemas">Reload</button>
+      
+      <button class="btn btn--ghost" id="btnModeToggle" title="切换：简洁模式（只看 Baseline） / 全部模式">简洁模式</button>
+      <button class="btn btn--ghost" id="btnClearDraft" title="清除本地草稿（localStorage）">清除草稿</button>
+<button class="btn btn--ghost" id="btnReloadSchemas" title="重新加载 R2 schemas">Reload</button>
       <button class="btn" id="btnPreview" title="生成 Prompt 预览（不会调用 OpenAI）">Prompt Preview</button>
       <button class="btn btn--primary" id="btnGenerate" title="调用 Worker 生成内容">Generate</button>
     </div>
@@ -96,10 +99,14 @@
               <div class="card__title">内容调节（Tuning · 最高标准）</div>
               <div class="card__subtitle">默认只留一个文本框：常规情况下不写；一旦写入，将覆盖 Baseline 与客户信息。</div>
             </div>
-            <div class="seg">
+            
+            <div class="row" style="justify-content:flex-end; gap:8px;">
+              <button class="btn btn--ghost" id="btnToggleTuning" title="默认折叠：避免干扰。需要时再展开。">展开 Tuning</button>
+              <div class="seg">
               <button class="seg__btn seg__btn--active" data-pane="form" data-target="tuning">表单</button>
               <button class="seg__btn" data-pane="json" data-target="tuning">JSON</button>
             </div>
+                      </div>
           </div>
 
           <div class="pane pane--active" id="pane_tuning_form">
@@ -157,6 +164,6 @@
     </footer>
   </main>
 
-<script src="./admin.js?v=2"></script>
+<script src="./admin_v3.js?v=3"></script>
 </body>
 </html>

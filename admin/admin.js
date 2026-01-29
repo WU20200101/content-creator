@@ -18,6 +18,34 @@ const state = {
   presets: [],
 };
 
+const UI = {
+  simpleMode: true,           // default: reduce eye travel
+  tuningCollapsed: true,      // default: avoid interference
+  draftKey: "cc_admin_draft_v3",
+  uiKey: "cc_admin_ui_v3",
+};
+
+function loadUIState(){
+  try{
+    const saved = JSON.parse(localStorage.getItem(UI.uiKey) || "{}");
+    if (typeof saved.simpleMode === "boolean") UI.simpleMode = saved.simpleMode;
+    if (typeof saved.tuningCollapsed === "boolean") UI.tuningCollapsed = saved.tuningCollapsed;
+  }catch(_){}
+}
+function saveUIState(){
+  localStorage.setItem(UI.uiKey, JSON.stringify({ simpleMode:UI.simpleMode, tuningCollapsed:UI.tuningCollapsed }));
+}
+function applyUIMode(){
+  document.body.classList.toggle("mode-simple", !!UI.simpleMode);
+  document.body.classList.toggle("tuning-collapsed", !!UI.tuningCollapsed);
+  const btn = $("#btnModeToggle");
+  if (btn) btn.textContent = UI.simpleMode ? "全部模式" : "简洁模式";
+  const tbtn = $("#btnToggleTuning");
+  if (tbtn) tbtn.textContent = UI.tuningCollapsed ? "展开 Tuning" : "收起 Tuning";
+  saveUIState();
+}
+
+
 function setStatus(msg){ $("#statusLine").textContent = msg || ""; }
 function loadConn(){
   const saved = JSON.parse(localStorage.getItem("cc_admin_conn") || "{}");
@@ -118,7 +146,19 @@ function ensureFormStyles(){
 }
 
 let dirty=false;
-function markDirty(){ dirty=true; setStatus("● 未保存（可保存 preset）"); }
+let __draftTimer=null;
+function saveDraftNow(){
+  try{
+    const payload = { t: Date.now(), data: collectPayload() };
+    localStorage.setItem(UI.draftKey, JSON.stringify(payload));
+  }catch(_){ /* ignore */ }
+}
+function markDirty(){
+  dirty=true;
+  setStatus("草稿中（已自动保存）");
+  if (__draftTimer) clearTimeout(__draftTimer);
+  __draftTimer = setTimeout(saveDraftNow, 450);
+}
 
 function syncJsonFromState(moduleKey){
   const ta = moduleKey==="user_profile" ? $("#json_user") : moduleKey==="baseline" ? $("#json_baseline") : $("#json_tuning");
@@ -130,7 +170,7 @@ function syncStateFromJson(moduleKey){
     const obj = JSON.parse(ta.value || "{}");
     state.data[moduleKey] = obj;
     dirty=true;
-    setStatus("● JSON 已更新（未保存 preset）");
+    setStatus("已同步（草稿中）");
 
     if (moduleKey==="user_profile") renderModule("user_profile", $("#render_user"), state.schemas.ui_user, state.data.user_profile);
     if (moduleKey==="baseline") renderModule("baseline", $("#render_baseline"), state.schemas.ui_baseline, state.data.baseline);
@@ -150,6 +190,9 @@ function renderModule(moduleKey, mountEl, uiSchema, dataObj){
     if (sec.subtitle) secEl.appendChild(el("div", { class:"section__sub", text: sec.subtitle }));
 
     for (const field of (sec.fields || [])){
+      // Simple mode: allow schema to hide low-priority fields to reduce cognitive load
+      if (UI.simpleMode && (field.meta?.hide_in_simple || field.meta?.priority==="low")) continue;
+
       const bindPath = field.bind?.path;
       if (!bindPath) continue;
 
@@ -326,6 +369,34 @@ function collectPayload(){
   };
 }
 
+function restoreDraftIfAny(){
+  try{
+    const raw = localStorage.getItem(UI.draftKey);
+    if (!raw) return false;
+    const saved = JSON.parse(raw);
+    if (!saved || !saved.data) return false;
+
+    const p = saved.data;
+    state.data.user_profile = p.user_profile || {};
+    state.data.baseline = p.baseline || {};
+    state.data.tuning = p.tuning || {};
+
+    renderModule("user_profile", $("#render_user"), state.schemas.ui_user, state.data.user_profile);
+    renderModule("baseline", $("#render_baseline"), state.schemas.ui_baseline, state.data.baseline);
+    renderModule("tuning", $("#render_tuning"), state.schemas.ui_tuning, state.data.tuning);
+
+    dirty=true;
+    const when = saved.t ? new Date(saved.t).toLocaleString() : "";
+    setStatus(when ? `已恢复上次草稿（${when}）` : "已恢复上次草稿");
+    return true;
+  }catch(_){ return false; }
+}
+function clearDraft(){
+  try{ localStorage.removeItem(UI.draftKey); }catch(_){}
+  setStatus("草稿已清除");
+}
+
+
 async function loadSchemas(){
   setStatus("加载 schemas...");
   const [userSchema, baselineSchema, tuningSchema, uiUser, uiBaseline, uiTuning] = await Promise.all([
@@ -353,7 +424,7 @@ async function loadSchemas(){
   renderModule("tuning", $("#render_tuning"), uiTuning, state.data.tuning);
 
   dirty=false;
-  setStatus("schemas 已加载");
+  setStatus("已加载");
 }
 
 async function loadPresets(){
@@ -372,7 +443,7 @@ async function previewPrompt(){
   const res = await apiPost("/api/preview", collectPayload());
   $("#promptPreview").value = res.prompt || "";
   $("#previewMeta").textContent = res.meta ? JSON.stringify(res.meta) : "";
-  setStatus("prompt preview 已生成（未调用 OpenAI）");
+  setStatus("预览已生成（未生成内容）");
 }
 
 async function generate(){
@@ -380,7 +451,7 @@ async function generate(){
   const res = await apiPost("/api/generate", collectPayload());
   $("#outputBox").value = typeof res.output === "string" ? res.output : JSON.stringify(res.output, null, 2);
   $("#jobMeta").textContent = `job_id: ${res.job_id || ""}`;
-  setStatus("生成完成");
+  setStatus("已生成");
 }
 
 async function presetSave(){
@@ -421,12 +492,23 @@ async function presetDelete(){
 }
 
 function setupButtons(){
+  $("#btnModeToggle")?.addEventListener("click", ()=>{
+    UI.simpleMode = !UI.simpleMode;
+    applyUIMode();
+  });
+  $("#btnToggleTuning")?.addEventListener("click", ()=>{
+    UI.tuningCollapsed = !UI.tuningCollapsed;
+    applyUIMode();
+  });
+  $("#btnClearDraft")?.addEventListener("click", ()=>{
+    clearDraft();
+  });
   $("#btnSaveConn").addEventListener("click", saveConn);
   $("#btnReloadSchemas").addEventListener("click", async ()=>{
     try{ await loadSchemas(); await loadPresets(); }catch(e){ setStatus(`Reload 失败：${e.message}`); }
   });
   $("#btnPreview").addEventListener("click", async ()=>{ try{ await previewPrompt(); }catch(e){ setStatus(`Preview 失败：${e.message}`); } });
-  $("#btnGenerate").addEventListener("click", async ()=>{ try{ await generate(); }catch(e){ setStatus(`Generate 失败：${e.message}`); } });
+  $("#btnGenerate").addEventListener("click", async (e)=>{ try{ await previewPrompt(); await generate(); }catch(err){ setStatus(`生成失败：${err.message}`); } });
 
   $("#btnPresetSave").addEventListener("click", async ()=>{ try{ await presetSave(); }catch(e){ setStatus(`Preset 保存失败：${e.message}`); } });
   $("#btnPresetLoad").addEventListener("click", async ()=>{ try{ await presetLoad(); }catch(e){ setStatus(`Preset 加载失败：${e.message}`); } });
@@ -442,11 +524,18 @@ function setupButtons(){
 
 async function init(){
   loadConn();
+  loadUIState();
+  applyUIMode();
   setupSeg();
   setupButtons();
   try{
     await loadSchemas();
     await loadPresets();
+
+    // restore draft after schemas are ready (so UI schema exists)
+    restoreDraftIfAny();
+
+    applyUIMode();
     setStatus("就绪");
   }catch(e){
     setStatus(`初始化失败：${e.message}（请检查 Worker 地址与 Token）`);
