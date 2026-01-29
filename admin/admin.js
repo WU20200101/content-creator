@@ -1,4 +1,4 @@
-/* Content-Creator Admin v2
+/* Content-Creator Admin
  * - 3 modules: user_profile (left), baseline (right), tuning (right)
  * - Form UI + Raw JSON advanced mode (bidirectional sync)
  * - Prompt Preview (server-assembled) before generate
@@ -21,8 +21,8 @@ const state = {
 const UI = {
   simpleMode: true,           // default: reduce eye travel
   tuningCollapsed: true,      // default: avoid interference
-  draftKey: "cc_admin_draft_v3",
-  uiKey: "cc_admin_ui_v3",
+  draftKey: "cc_admin_draft",
+  uiKey: "cc_admin_ui",
 };
 
 function loadUIState(){
