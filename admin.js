@@ -475,7 +475,9 @@ async function previewPrompt(){
   await maybeSwitchPack(p);
 
   const res = await apiPost("/api/preview", payload);
-  $("#promptText").value = res.prompt_text || "";
+  const promptEl = document.getElementById("promptPreview");
+  if (promptEl) promptEl.value = res.prompt_text || "";
+  else console.warn("promptPreview textarea not found");
   setStatus("预览就绪");
 }
 
@@ -486,18 +488,23 @@ async function generate(){
   await maybeSwitchPack(p);
 
   const res = await apiPost("/api/generate", payload);
-  $("#promptText").value = res.prompt_text || "";
+  const promptEl = document.getElementById("promptPreview");
+  if (promptEl) promptEl.value = res.prompt_text || "";
   const out = res.output_json ?? res.output ?? null;
   if (typeof out === "string") {
-    $("#outputText").value = out;
+    const outEl = document.getElementById("outputBox");
+    if (outEl) outEl.value = out;
   } else if (out != null) {
     try{
-      $("#outputText").value = JSON.stringify(out, null, 2);
+      const outEl = document.getElementById("outputBox");
+      if (outEl) outEl.value = JSON.stringify(out, null, 2);
     }catch(e){
-      $("#outputText").value = String(out);
+      const outEl = document.getElementById("outputBox");
+      if (outEl) outEl.value = String(out);
     }
   } else {
-    $("#outputText").value = "";
+    const outEl = document.getElementById("outputBox");
+    if (outEl) outEl.value = "";
   }
   setStatus("生成完成");
 }
