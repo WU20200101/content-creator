@@ -439,7 +439,7 @@ async function loadSchemas(platform, forceReset=false){
   await loadPresets();
 }
 
-async function loadPresets(){
+async function loadPresets(selectId) {
   try{
     const res = await apiGet("/api/presets/list");
     state.presets = res.presets || [];
@@ -501,6 +501,19 @@ async function presetDelete(){
   setStatus("预设已删除");
 }
 
+async function presetUpdate(){
+  const sel = document.getElementById("presetSelect");
+  const id = sel && sel.value ? sel.value : "";
+  if(!id) throw new Error("请先从下拉框选择要更新的预设");
+  const name = (document.getElementById("presetName")?.value || "").trim() || (sel.options[sel.selectedIndex]?.text || "").trim();
+  const payload = collectPayload();
+  await apiPost("/api/presets/save", { id, name, payload_json: payload });
+  await loadPresets();
+  if(sel) sel.value = id;
+  setStatus("已更新预设");
+}
+
+
 
 async function previewPrompt(){
   setStatus("预览脚本...");
@@ -522,21 +535,21 @@ async function generate(){
   const res = await apiPost("/api/generate", payload);
   const promptEl = document.getElementById("promptPreview");
   if (promptEl) promptEl.value = res.prompt_text || "";
-  const out = res.output_json ?? res.output ?? null;
-  if (typeof out === "string") {
-    const outEl = document.getElementById("outputBox");
-    if (outEl) outEl.value = out;
-  } else if (out != null) {
-    try{
-      const outEl = document.getElementById("outputBox");
-      if (outEl) outEl.value = JSON.stringify(out, null, 2);
-    }catch(e){
-      const outEl = document.getElementById("outputBox");
-      if (outEl) outEl.value = String(out);
+
+  const outEl = document.getElementById("outputBox");
+  if (outEl) {
+    const t = (res.output_text && String(res.output_text).trim()) ? String(res.output_text) : "";
+    if (t) {
+      outEl.value = t;
+    } else {
+      const out = res.output_json ?? res.output ?? null;
+      if (out == null) outEl.value = "";
+      else if (typeof out === "string") outEl.value = out;
+      else {
+        try{ outEl.value = JSON.stringify(out, null, 2); }
+        catch(e){ outEl.value = String(out); }
+      }
     }
-  } else {
-    const outEl = document.getElementById("outputBox");
-    if (outEl) outEl.value = "";
   }
   setStatus("生成完成");
 }
@@ -550,6 +563,7 @@ function setupButtons(){
   $("#btnGenerate").addEventListener("click", async ()=>{ try{ await generate(); }catch(e){ setStatus(`生成失败：${e.message}`); } });
 
   $("#btnPresetSave").addEventListener("click", async ()=>{ try{ await presetSave(); }catch(e){ setStatus(`保存失败：${e.message}`); } });
+  $("#btnPresetUpdate").addEventListener("click", async ()=>{ try{ await presetUpdate(); }catch(e){ setStatus(`更新失败：${e.message}`); } });
   $("#btnPresetLoad").addEventListener("click", async ()=>{ try{ await presetLoad(); }catch(e){ setStatus(`加载失败：${e.message}`); } });
   $("#btnPresetDelete").addEventListener("click", async ()=>{ try{ await presetDelete(); }catch(e){ setStatus(`删除失败：${e.message}`); } });
 
@@ -587,6 +601,7 @@ function setupPlatformTop(){
     const p = sel.value || "xiaohongshu";
     try{
       await loadSchemas(p, true);
+      await loadPresets();
       setStatus(`已切换：${sel.options[sel.selectedIndex]?.text || p}`);
     }catch(e){
       setStatus(`切换失败：${e.message}`);
@@ -603,7 +618,8 @@ async function init(){
 
   try{
     await loadSchemas(state.currentPlatform, true);
-        setStatus("就绪");
+    await loadPresets();
+    setStatus('就绪');
   }catch(e){
     setStatus(`初始化失败：${e.message}（检查 Worker 地址与 Token）`);
   }
