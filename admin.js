@@ -467,6 +467,41 @@ async function presetDelete(){
     setStatus("预设已删除");
 }
 
+
+async function previewPrompt(){
+  setStatus("预览脚本...");
+  const payload = collectPayload();
+  const p = payload.user_profile?.platform || "xiaohongshu";
+  await maybeSwitchPack(p);
+
+  const res = await apiPost("/api/preview", payload);
+  $("#promptText").value = res.prompt_text || "";
+  setStatus("预览就绪");
+}
+
+async function generate(){
+  setStatus("生成中...");
+  const payload = collectPayload();
+  const p = payload.user_profile?.platform || "xiaohongshu";
+  await maybeSwitchPack(p);
+
+  const res = await apiPost("/api/generate", payload);
+  $("#promptText").value = res.prompt_text || "";
+  const out = res.output_json ?? res.output ?? null;
+  if (typeof out === "string") {
+    $("#outputText").value = out;
+  } else if (out != null) {
+    try{
+      $("#outputText").value = JSON.stringify(out, null, 2);
+    }catch(e){
+      $("#outputText").value = String(out);
+    }
+  } else {
+    $("#outputText").value = "";
+  }
+  setStatus("生成完成");
+}
+
 function setupButtons(){
   $("#btnSaveConn").addEventListener("click", saveConn);
   $("#btnReloadSchemas").addEventListener("click", async ()=>{
