@@ -1,52 +1,24 @@
-/* Content-Creator Admin
- * - 3 modules: user_profile (left), baseline (right), tuning (right)
- * - Form UI + Raw JSON advanced mode (bidirectional sync)
- * - Prompt Preview (server-assembled) before generate
- * - Presets CRUD via D1 (server endpoints)
- * - Apple/iOS minimal white UI
- */
+/* Admin v4 — follow user's mock.
+   Requires Worker endpoints:
+   /api/schema/{user_profile|baseline|tuning}
+   /api/ui/{user_profile|baseline|tuning}
+   /api/preview
+   /api/generate
+   /api/presets , /api/presets/{id}, /api/presets/save , /api/presets/delete
+*/
 
 const $ = (sel) => document.querySelector(sel);
 
 const state = {
   conn: { baseUrl: "", token: "" },
-  schemas: {
-    user_profile: null, baseline: null, tuning: null,
-    ui_user: null, ui_baseline: null, ui_tuning: null,
-  },
-  data: { user_profile: {}, baseline: {}, tuning: {} },
+  schemas: { user_profile:null, baseline:null, tuning:null, ui_user:null, ui_baseline:null, ui_tuning:null },
+  data: { user_profile:{}, baseline:{}, tuning:{} },
   presets: [],
+  ui: { simpleMode:false, activeSecId:null },
 };
-
-const UI = {
-  simpleMode: true,           // default: reduce eye travel
-  tuningCollapsed: true,      // default: avoid interference
-  draftKey: "cc_admin_draft",
-  uiKey: "cc_admin_ui",
-};
-
-function loadUIState(){
-  try{
-    const saved = JSON.parse(localStorage.getItem(UI.uiKey) || "{}");
-    if (typeof saved.simpleMode === "boolean") UI.simpleMode = saved.simpleMode;
-    if (typeof saved.tuningCollapsed === "boolean") UI.tuningCollapsed = saved.tuningCollapsed;
-  }catch(_){}
-}
-function saveUIState(){
-  localStorage.setItem(UI.uiKey, JSON.stringify({ simpleMode:UI.simpleMode, tuningCollapsed:UI.tuningCollapsed }));
-}
-function applyUIMode(){
-  document.body.classList.toggle("mode-simple", !!UI.simpleMode);
-  document.body.classList.toggle("tuning-collapsed", !!UI.tuningCollapsed);
-  const btn = $("#btnModeToggle");
-  if (btn) btn.textContent = UI.simpleMode ? "全部模式" : "简洁模式";
-  const tbtn = $("#btnToggleTuning");
-  if (tbtn) tbtn.textContent = UI.tuningCollapsed ? "展开 Tuning" : "收起 Tuning";
-  saveUIState();
-}
-
 
 function setStatus(msg){ $("#statusLine").textContent = msg || ""; }
+
 function loadConn(){
   const saved = JSON.parse(localStorage.getItem("cc_admin_conn") || "{}");
   state.conn.baseUrl = saved.baseUrl || "https://content-creator.wuxiaofei1985.workers.dev";
@@ -58,7 +30,7 @@ function saveConn(){
   state.conn.baseUrl = $("#workerBaseUrl").value.trim().replace(/\/+$/, "");
   state.conn.token = $("#adminToken").value.trim();
   localStorage.setItem("cc_admin_conn", JSON.stringify(state.conn));
-  $("#connHint").textContent = "已保存。";
+  setStatus("连接已保存");
 }
 function authHeaders(){
   const h = { "Content-Type": "application/json" };
@@ -80,7 +52,7 @@ async function apiPost(path, body){
   return JSON.parse(text);
 }
 
-/* ---------- tiny deep get/set ---------- */
+/* deep get/set */
 function deepGet(obj, path){
   const parts = path.split(".");
   let cur = obj;
@@ -100,6 +72,15 @@ function deepSet(obj, path, value){
   }
   cur[parts[parts.length-1]] = value;
 }
+function isNonEmpty(v){
+  if (v === null || v === undefined) return false;
+  if (typeof v === "string") return v.trim().length > 0;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "number") return true;
+  if (typeof v === "boolean") return true;
+  if (typeof v === "object") return Object.keys(v).length > 0;
+  return !!v;
+}
 function clamp(n, min, max){
   const x = Number(n);
   if (Number.isNaN(x)) return min;
@@ -110,364 +91,363 @@ function el(tag, attrs = {}, children = []){
   for (const [k,v] of Object.entries(attrs)){
     if (k==="class") node.className = v;
     else if (k==="text") node.textContent = v;
-    else if (k.startsWith("on") && typeof v==="function") node.addEventListener(k.slice(2), v);
     else node.setAttribute(k, v);
   }
   for (const c of children) node.appendChild(c);
   return node;
 }
-function ensureFormStyles(){
-  if ($("#__formstyle")) return;
-  const style = document.createElement("style");
-  style.id="__formstyle";
-  style.textContent = `
-    .section{ border:1px solid var(--line); border-radius:14px; padding:12px; margin-bottom:12px; }
-    .section__title{ font-weight:750; font-size:13px; margin-bottom:4px; }
-    .section__sub{ color:var(--muted); font-size:12px; margin-bottom:10px; }
-    .f{ margin-bottom:12px; }
-    .f__label{ font-size:12px; font-weight:650; }
-    .f__help{ font-size:11px; color:var(--muted); margin:4px 0 6px; }
-    .ctl{ width:100%; }
-    .ctl input[type="text"], .ctl input[type="number"], .ctl textarea, .ctl select{
-      width:100%; height:36px; border:1px solid var(--line); border-radius:12px; padding:0 10px; outline:none; background:#fff;
-    }
-    .ctl textarea{ height:auto; min-height:72px; padding:10px; }
-    .ctl input:focus, .ctl textarea:focus, .ctl select:focus{
-      border-color:rgba(0,122,255,.45); box-shadow:0 0 0 4px rgba(0,122,255,.10);
-    }
-    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    .mini{ font-size:11px; color:var(--muted); }
-    .tags{ display:flex; gap:8px; flex-wrap:wrap; }
-    .tag{ border:1px solid var(--line); border-radius:999px; padding:6px 10px; cursor:pointer; user-select:none; }
-    .tag--on{ background:rgba(0,122,255,.10); border-color:rgba(0,122,255,.25); }
-    .kv{ display:grid; grid-template-columns: 1fr 120px; gap:8px; }
-  `;
-  document.head.appendChild(style);
-}
 
-let dirty=false;
-let __draftTimer=null;
-function saveDraftNow(){
+/* Draft autosave */
+function saveDraft(){
+  try{ localStorage.setItem("cc_admin_draft_v4", JSON.stringify(state.data)); }catch(_){}
+}
+function loadDraft(){
   try{
-    const payload = { t: Date.now(), data: collectPayload() };
-    localStorage.setItem(UI.draftKey, JSON.stringify(payload));
-  }catch(_){ /* ignore */ }
+    const raw = localStorage.getItem("cc_admin_draft_v4");
+    if (!raw) return false;
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === "object"){
+      state.data.user_profile = obj.user_profile || state.data.user_profile;
+      state.data.baseline = obj.baseline || state.data.baseline;
+      state.data.tuning = obj.tuning || state.data.tuning;
+      return true;
+    }
+  }catch(_){}
+  return false;
 }
-function markDirty(){
-  dirty=true;
-  setStatus("草稿中（已自动保存）");
-  if (__draftTimer) clearTimeout(__draftTimer);
-  __draftTimer = setTimeout(saveDraftNow, 450);
+function clearDraft(){
+  localStorage.removeItem("cc_admin_draft_v4");
+  setStatus("草稿已清除");
+}
+function markDirty(msg){
+  saveDraft();
+  setStatus(msg || "草稿中（自动保存）");
 }
 
-function syncJsonFromState(moduleKey){
-  const ta = moduleKey==="user_profile" ? $("#json_user") : moduleKey==="baseline" ? $("#json_baseline") : $("#json_tuning");
-  ta.value = JSON.stringify(state.data[moduleKey], null, 2);
+function collectPayload(){
+  return { user_profile: state.data.user_profile||{}, baseline: state.data.baseline||{}, tuning: state.data.tuning||{} };
 }
-function syncStateFromJson(moduleKey){
-  const ta = moduleKey==="user_profile" ? $("#json_user") : moduleKey==="baseline" ? $("#json_baseline") : $("#json_tuning");
+
+/* Sections index */
+function buildSectionIndex(){
+  const idx = [];
+  const add = (moduleKey, uiSchema) => {
+    const sections = (uiSchema && uiSchema.sections) ? uiSchema.sections : [];
+    sections.forEach((sec, i)=>{
+      idx.push({
+        id: `${moduleKey}:${i}`,
+        moduleKey,
+        secIndex: i,
+        title: sec.title || `Section ${i+1}`,
+        subtitle: sec.subtitle || "",
+        fields: sec.fields || [],
+      });
+    });
+  };
+  add("user_profile", state.schemas.ui_user);
+  add("baseline", state.schemas.ui_baseline);
+  add("tuning", state.schemas.ui_tuning);
+  return idx;
+}
+function sectionHasSignal(sec){
+  const dataObj = state.data[sec.moduleKey] || {};
+  for (const f of sec.fields){
+    const p = f.bind?.path;
+    if (!p) continue;
+    const v = deepGet(dataObj, p);
+    if (isNonEmpty(v)) return true;
+  }
+  return false;
+}
+
+/* Render left list + editor */
+function renderSectionList(){
+  const mount = $("#secList");
+  mount.innerHTML = "";
+  const secs = buildSectionIndex();
+  if (!state.ui.activeSecId && secs.length) state.ui.activeSecId = secs[0].id;
+
+  for (const sec of secs){
+    const active = sec.id === state.ui.activeSecId;
+    const has = sectionHasSignal(sec);
+    const item = el("div", { class: "secItem" + (active ? " secItem--active":"") });
+
+    item.appendChild(el("div", { class:"secItem__chev", text: active && !state.ui.simpleMode ? "▾" : "▸" }));
+    item.appendChild(el("div", { class:"secItem__title", text: sec.title }));
+    item.appendChild(el("div", { class:"secItem__badge" + (has ? " secItem__badge--on":""), text: has ? "✓" : "" }));
+
+    item.addEventListener("click", ()=>{
+      state.ui.activeSecId = sec.id;
+      renderLeft();
+    });
+
+    mount.appendChild(item);
+  }
+}
+
+function renderFieldControl(moduleKey, field, dataObj){
+  const bindPath = field.bind?.path;
+  if (!bindPath) return null;
+
+  const ctlType = field.control?.type || "text";
+  const label = field.label || bindPath;
+  const help = field.help || "";
+
+  if (deepGet(dataObj, bindPath)===undefined && field.default!==undefined){
+    deepSet(dataObj, bindPath, field.default);
+  }
+
+  let controlNode;
+
+  if (ctlType==="select"){
+    const sel = el("select");
+    for (const opt of (field.control.options || [])){
+      sel.appendChild(el("option", { value:String(opt.value), text: opt.label || String(opt.value) }));
+    }
+    sel.value = String(deepGet(dataObj, bindPath) ?? field.default ?? "");
+		sel.addEventListener("change", ()=>{
+			deepSet(dataObj, bindPath, sel.value);
+
+			// 平台切换：自动加载对应 schema pack（只影响 UI/schema，不强制清空用户已填数据）
+			if (moduleKey === "user_profile" && bindPath === "platform"){
+				state.data.user_profile = state.data.user_profile || {};
+				state.data.user_profile.platform = sel.value;
+				maybeSwitchPack(sel.value).catch(()=>{});
+			}
+
+			syncAllJsonFromState(); markDirty(); renderSectionList();
+		});
+    controlNode = el("div", { class:"ctl" }, [sel]);
+
+  } else if (ctlType==="number"){
+    const input = el("input", { type:"number", min: field.control.min ?? 0, max: field.control.max ?? 99999, step: field.control.step ?? 1 });
+    input.value = String(deepGet(dataObj, bindPath) ?? field.default ?? "");
+    input.addEventListener("change", ()=>{
+      const v = clamp(input.value, Number(input.min), Number(input.max));
+      input.value = String(v);
+      deepSet(dataObj, bindPath, v);
+      syncAllJsonFromState(); markDirty(); renderSectionList();
+    });
+    controlNode = el("div", { class:"ctl" }, [input]);
+
+  } else if (ctlType==="textarea"){
+    const ta = el("textarea");
+    ta.value = String(deepGet(dataObj, bindPath) ?? field.default ?? "");
+    ta.addEventListener("change", ()=>{
+      deepSet(dataObj, bindPath, ta.value);
+      syncAllJsonFromState(); markDirty(); renderSectionList();
+    });
+    controlNode = el("div", { class:"ctl" }, [ta]);
+
+  } else if (ctlType==="switch"){
+    const chk = el("input", { type:"checkbox" });
+    chk.checked = !!(deepGet(dataObj, bindPath) ?? field.default);
+    const lab = el("span", { class:"mini", text: chk.checked ? "ON":"OFF" });
+    chk.addEventListener("change", ()=>{
+      deepSet(dataObj, bindPath, !!chk.checked);
+      lab.textContent = chk.checked ? "ON":"OFF";
+      syncAllJsonFromState(); markDirty(); renderSectionList();
+    });
+    controlNode = el("div", { class:"ctl row" }, [chk, lab]);
+
+  } else if (ctlType==="multicheck"){
+    const cur = new Set(deepGet(dataObj, bindPath) || field.default || []);
+    const options = field.control.options || [];
+    const tags = el("div", { class:"tags" });
+    for (const opt of options){
+      const val = opt.value;
+      const t = el("div", { class:"tag", text: opt.label || val });
+      if (cur.has(val)) t.classList.add("tag--on");
+      t.addEventListener("click", ()=>{
+        if (cur.has(val)) cur.delete(val); else cur.add(val);
+        t.classList.toggle("tag--on");
+        deepSet(dataObj, bindPath, Array.from(cur));
+        syncAllJsonFromState(); markDirty(); renderSectionList();
+      });
+      tags.appendChild(t);
+    }
+    controlNode = el("div", { class:"ctl" }, [tags]);
+
+  } else if (ctlType==="taglist"){
+    const input = el("input", { type:"text", placeholder:"用逗号分隔：例如 词1,词2,词3" });
+    const v = deepGet(dataObj, bindPath);
+    input.value = Array.isArray(v) ? v.join(",") : (v ? String(v) : "");
+    input.addEventListener("change", ()=>{
+      const arr = input.value.split(",").map(s=>s.trim()).filter(Boolean);
+      deepSet(dataObj, bindPath, arr);
+      syncAllJsonFromState(); markDirty(); renderSectionList();
+    });
+    controlNode = el("div", { class:"ctl" }, [input]);
+
+  } else if (ctlType==="kv_percent"){
+    const keys = field.control.keys || [];
+    const obj = deepGet(dataObj, bindPath) || field.default || {};
+    const grid = el("div", { class:"ctl" });
+    for (const k of keys){
+      const row = el("div", { class:"kv" });
+      row.appendChild(el("div", { class:"mini", text:k }));
+      const input = el("input", { type:"number", min:0, max:100, step:1 });
+      input.value = String(obj[k] ?? 0);
+      input.addEventListener("change", ()=>{
+        const v = clamp(input.value, 0, 100);
+        input.value = String(v);
+        obj[k] = v;
+        deepSet(dataObj, bindPath, obj);
+        syncAllJsonFromState(); markDirty(); renderSectionList();
+      });
+      row.appendChild(input);
+      grid.appendChild(row);
+    }
+    controlNode = grid;
+
+  } else {
+    const input = el("input", { type:"text" });
+    input.value = String(deepGet(dataObj, bindPath) ?? field.default ?? "");
+    input.addEventListener("change", ()=>{
+      deepSet(dataObj, bindPath, input.value);
+      syncAllJsonFromState(); markDirty(); renderSectionList();
+    });
+    controlNode = el("div", { class:"ctl" }, [input]);
+  }
+
+  const wrap = el("div", { class:"f" });
+  wrap.appendChild(el("div", { class:"f__label", text: label }));
+  if (help) wrap.appendChild(el("div", { class:"f__help", text: help }));
+  wrap.appendChild(controlNode);
+  return wrap;
+}
+
+function renderActiveSection(){
+  const mount = $("#secEditor");
+  mount.innerHTML = "";
+  if (state.ui.simpleMode) return;
+
+  const secs = buildSectionIndex();
+  const sec = secs.find(s=>s.id===state.ui.activeSecId) || secs[0];
+  if (!sec) return;
+
+  const dataObj = state.data[sec.moduleKey] || {};
+  const secEl = el("div", { class:"section" });
+  secEl.appendChild(el("div", { class:"section__title", text: sec.title }));
+  if (sec.subtitle) secEl.appendChild(el("div", { class:"section__sub", text: sec.subtitle }));
+
+  for (const field of sec.fields){
+    const node = renderFieldControl(sec.moduleKey, field, dataObj);
+    if (node) secEl.appendChild(node);
+  }
+  mount.appendChild(secEl);
+}
+
+function renderLeft(){
+  renderSectionList();
+  renderActiveSection();
+  syncAllJsonFromState();
+}
+
+/* JSON mode */
+function syncAllJsonFromState(){
+  $("#json_all").value = JSON.stringify(collectPayload(), null, 2);
+}
+function syncStateFromAllJson(){
   try{
-    const obj = JSON.parse(ta.value || "{}");
-    state.data[moduleKey] = obj;
-    dirty=true;
-    setStatus("已同步（草稿中）");
-
-    if (moduleKey==="user_profile") renderModule("user_profile", $("#render_user"), state.schemas.ui_user, state.data.user_profile);
-    if (moduleKey==="baseline") renderModule("baseline", $("#render_baseline"), state.schemas.ui_baseline, state.data.baseline);
-    if (moduleKey==="tuning") renderModule("tuning", $("#render_tuning"), state.schemas.ui_tuning, state.data.tuning);
+    const obj = JSON.parse($("#json_all").value || "{}");
+    state.data.user_profile = obj.user_profile || {};
+    state.data.baseline = obj.baseline || {};
+    state.data.tuning = obj.tuning || {};
+    saveDraft();
+    setStatus("已同步 JSON（草稿中）");
+    renderLeft();
   }catch(e){
     setStatus(`JSON 解析失败：${e.message}`);
   }
 }
 
-function renderModule(moduleKey, mountEl, uiSchema, dataObj){
-  ensureFormStyles();
-  mountEl.innerHTML="";
-  const sections = uiSchema.sections || [];
-  for (const sec of sections){
-    const secEl = el("div", { class:"section" });
-    secEl.appendChild(el("div", { class:"section__title", text: sec.title || "" }));
-    if (sec.subtitle) secEl.appendChild(el("div", { class:"section__sub", text: sec.subtitle }));
-
-    for (const field of (sec.fields || [])){
-      // Simple mode: allow schema to hide low-priority fields to reduce cognitive load
-      if (UI.simpleMode && (field.meta?.hide_in_simple || field.meta?.priority==="low")) continue;
-
-      const bindPath = field.bind?.path;
-      if (!bindPath) continue;
-
-      const ctlType = field.control?.type || "text";
-      const label = field.label || bindPath;
-      const help = field.help || "";
-      const curVal = deepGet(dataObj, bindPath);
-      if (curVal===undefined && field.default!==undefined) deepSet(dataObj, bindPath, field.default);
-
-      let controlNode;
-
-      if (ctlType==="select"){
-        const sel = el("select", {});
-        for (const opt of (field.control.options || [])){
-          sel.appendChild(el("option", { value:String(opt.value), text: opt.label || String(opt.value) }));
-        }
-        sel.value = String(deepGet(dataObj, bindPath) ?? field.default ?? "");
-        sel.addEventListener("change", ()=>{
-          deepSet(dataObj, bindPath, sel.value);
-          syncJsonFromState(moduleKey); markDirty();
-        });
-        controlNode = el("div", { class:"ctl" }, [sel]);
-
-      } else if (ctlType==="slider"){
-        const min = field.control.min ?? 0;
-        const max = field.control.max ?? 100;
-        const step = field.control.step ?? 1;
-        const input = el("input", { type:"range", min, max, step });
-        const valueLabel = el("div", { class:"mini", text:String(deepGet(dataObj, bindPath) ?? field.default ?? "") });
-        input.value = String(deepGet(dataObj, bindPath) ?? field.default ?? min);
-        input.addEventListener("input", ()=>{
-          deepSet(dataObj, bindPath, Number(input.value));
-          valueLabel.textContent = String(input.value);
-          syncJsonFromState(moduleKey); markDirty();
-        });
-        controlNode = el("div", { class:"ctl" }, [input, valueLabel]);
-
-      } else if (ctlType==="switch"){
-        const chk = el("input", { type:"checkbox" });
-        chk.checked = !!(deepGet(dataObj, bindPath) ?? field.default);
-        const lab = el("span", { class:"mini", text: chk.checked ? "ON":"OFF" });
-        chk.addEventListener("change", ()=>{
-          deepSet(dataObj, bindPath, !!chk.checked);
-          lab.textContent = chk.checked ? "ON":"OFF";
-          syncJsonFromState(moduleKey); markDirty();
-        });
-        controlNode = el("div", { class:"ctl row" }, [chk, lab]);
-
-      } else if (ctlType==="number"){
-        const input = el("input", { type:"number", min: field.control.min ?? 0, max: field.control.max ?? 99999, step: field.control.step ?? 1 });
-        input.value = String(deepGet(dataObj, bindPath) ?? field.default ?? "");
-        input.addEventListener("change", ()=>{
-          const v = clamp(input.value, Number(input.min), Number(input.max));
-          input.value = String(v);
-          deepSet(dataObj, bindPath, v);
-          syncJsonFromState(moduleKey); markDirty();
-        });
-        controlNode = el("div", { class:"ctl" }, [input]);
-
-      } else if (ctlType==="textarea"){
-        const ta = el("textarea", {});
-        ta.value = String(deepGet(dataObj, bindPath) ?? field.default ?? "");
-        ta.addEventListener("change", ()=>{
-          deepSet(dataObj, bindPath, ta.value);
-          syncJsonFromState(moduleKey); markDirty();
-        });
-        controlNode = el("div", { class:"ctl" }, [ta]);
-
-      } else if (ctlType==="multicheck"){
-        const cur = new Set(deepGet(dataObj, bindPath) || field.default || []);
-        const options = field.control.options || [];
-        const tags = el("div", { class:"tags" });
-        for (const opt of options){
-          const val = opt.value;
-          const t = el("div", { class:"tag", text: opt.label || val });
-          if (cur.has(val)) t.classList.add("tag--on");
-          t.addEventListener("click", ()=>{
-            if (cur.has(val)) cur.delete(val); else cur.add(val);
-            t.classList.toggle("tag--on");
-            deepSet(dataObj, bindPath, Array.from(cur));
-            syncJsonFromState(moduleKey); markDirty();
-          });
-          tags.appendChild(t);
-        }
-        controlNode = el("div", { class:"ctl" }, [tags]);
-
-      } else if (ctlType==="taglist"){
-        const input = el("input", { type:"text", placeholder:"用逗号分隔：例如 词1,词2,词3" });
-        const v = deepGet(dataObj, bindPath);
-        input.value = Array.isArray(v) ? v.join(",") : (v ? String(v) : "");
-        input.addEventListener("change", ()=>{
-          const arr = input.value.split(",").map(s=>s.trim()).filter(Boolean);
-          deepSet(dataObj, bindPath, arr);
-          syncJsonFromState(moduleKey); markDirty();
-        });
-        controlNode = el("div", { class:"ctl" }, [input]);
-
-      } else if (ctlType==="kv_percent"){
-        const keys = field.control.keys || [];
-        const obj = deepGet(dataObj, bindPath) || field.default || {};
-        const grid = el("div", { class:"ctl" });
-        for (const k of keys){
-          const row = el("div", { class:"kv" });
-          row.appendChild(el("div", { class:"mini", text:k }));
-          const input = el("input", { type:"number", min:0, max:100, step:1 });
-          input.value = String(obj[k] ?? 0);
-          input.addEventListener("change", ()=>{
-            const v = clamp(input.value, 0, 100);
-            input.value = String(v);
-            obj[k] = v;
-            deepSet(dataObj, bindPath, obj);
-            syncJsonFromState(moduleKey); markDirty();
-          });
-          row.appendChild(input);
-          grid.appendChild(row);
-        }
-        controlNode = grid;
-
-      } else {
-        const input = el("input", { type:"text" });
-        input.value = String(deepGet(dataObj, bindPath) ?? field.default ?? "");
-        input.addEventListener("change", ()=>{
-          deepSet(dataObj, bindPath, input.value);
-          syncJsonFromState(moduleKey); markDirty();
-        });
-        controlNode = el("div", { class:"ctl" }, [input]);
-      }
-
-      const wrap = el("div", { class:"f" });
-      wrap.appendChild(el("div", { class:"f__label", text: label }));
-      if (help) wrap.appendChild(el("div", { class:"f__help", text: help }));
-      wrap.appendChild(controlNode);
-
-      secEl.appendChild(wrap);
-    }
-
-    mountEl.appendChild(secEl);
-  }
-
-  syncJsonFromState(moduleKey);
-}
-
-/* ---------- Tabs ---------- */
 function setupSeg(){
   document.querySelectorAll(".seg__btn").forEach(btn=>{
     btn.addEventListener("click", ()=>{
-      const target = btn.dataset.target;
-      const pane = btn.dataset.pane;
-
       btn.parentElement.querySelectorAll(".seg__btn").forEach(b=>b.classList.remove("seg__btn--active"));
       btn.classList.add("seg__btn--active");
-
-      const formId = `#pane_${target}_form`;
-      const jsonId = `#pane_${target}_json`;
-      document.querySelector(formId).classList.toggle("pane--active", pane==="form");
-      document.querySelector(jsonId).classList.toggle("pane--active", pane==="json");
+      const pane = btn.dataset.pane;
+      $("#pane_left_form").classList.toggle("pane--active", pane==="form");
+      $("#pane_left_json").classList.toggle("pane--active", pane==="json");
     });
   });
+  $("#json_all").addEventListener("keydown", (e)=>{ if (e.ctrlKey && e.key==="Enter") syncStateFromAllJson(); });
+  $("#json_all").addEventListener("blur", ()=> syncStateFromAllJson());
+}
 
-  ["user","baseline","tuning"].forEach(t=>{
-    const ta = $(`#json_${t}`);
-    const key = t==="user" ? "user_profile" : t;
-    ta.addEventListener("keydown", (e)=>{ if (e.ctrlKey && e.key==="Enter") syncStateFromJson(key); });
-    ta.addEventListener("blur", ()=> syncStateFromJson(key));
+function setupAcc(){
+  document.querySelectorAll(".acc__head").forEach(h=>{
+    h.addEventListener("click", ()=>{
+      const acc = h.closest(".acc");
+      acc.classList.toggle("acc--collapsed");
+    });
   });
 }
 
-/* ---------- Data ---------- */
-function collectPayload(){
-  return {
-    user_profile: state.data.user_profile || {},
-    baseline: state.data.baseline || {},
-    tuning: state.data.tuning || {},
-  };
+/* Load schemas + presets */
+async function loadSchemas(platform){
+  const p = (platform || state.data.user_profile?.platform || "xiaohongshu");
+  setStatus(`加载 schema pack... (${p})`);
+  const pack = await apiGet(`/api/ui/schema?platform=${encodeURIComponent(p)}`);
+
+  // 方案A：ui_schema 同时作为渲染用的 schema（包含 type/enum/default 等）
+  state.schemas.user_profile = pack.user_profile_schema;
+  state.schemas.baseline = pack.baseline_schema;
+  state.schemas.tuning = pack.tuning_schema;
+  state.schemas.pack_name = pack.pack || "";
+
+  // 与旧渲染逻辑兼容：ui_* 指向同一个 schema
+  state.schemas.ui_user = pack.user_profile_schema;
+  state.schemas.ui_baseline = pack.baseline_schema;
+  state.schemas.ui_tuning = pack.tuning_schema;
+
+  // 首次初始化时才填默认值；切包时尽量保留用户已有输入
+  if (!state.__hasInitData) {
+    state.data.user_profile = {};
+    state.data.baseline = (pack.baseline_schema && pack.baseline_schema.default_payload) ? pack.baseline_schema.default_payload : {};
+    state.data.tuning = { text: "" };
+    state.__hasInitData = true;
+  }
+
+  const usedDraft = loadDraft();
+  renderLeft();
+  setStatus(usedDraft ? "已加载草稿" : "已加载空表单");
 }
 
-function restoreDraftIfAny(){
-  try{
-    const raw = localStorage.getItem(UI.draftKey);
-    if (!raw) return false;
-    const saved = JSON.parse(raw);
-    if (!saved || !saved.data) return false;
-
-    const p = saved.data;
-    state.data.user_profile = p.user_profile || {};
-    state.data.baseline = p.baseline || {};
-    state.data.tuning = p.tuning || {};
-
-    renderModule("user_profile", $("#render_user"), state.schemas.ui_user, state.data.user_profile);
-    renderModule("baseline", $("#render_baseline"), state.schemas.ui_baseline, state.data.baseline);
-    renderModule("tuning", $("#render_tuning"), state.schemas.ui_tuning, state.data.tuning);
-
-    dirty=true;
-    const when = saved.t ? new Date(saved.t).toLocaleString() : "";
-    setStatus(when ? `已恢复上次草稿（${when}）` : "已恢复上次草稿");
-    return true;
-  }catch(_){ return false; }
-}
-function clearDraft(){
-  try{ localStorage.removeItem(UI.draftKey); }catch(_){}
-  setStatus("草稿已清除");
-}
-
-
-async function loadSchemas(){
-  setStatus("加载 schemas...");
-  const [userSchema, baselineSchema, tuningSchema, uiUser, uiBaseline, uiTuning] = await Promise.all([
-    apiGet("/api/schema/user_profile"),
-    apiGet("/api/schema/baseline"),
-    apiGet("/api/schema/tuning"),
-    apiGet("/api/ui/user_profile"),
-    apiGet("/api/ui/baseline"),
-    apiGet("/api/ui/tuning"),
-  ]);
-
-  state.schemas.user_profile = userSchema;
-  state.schemas.baseline = baselineSchema;
-  state.schemas.tuning = tuningSchema;
-  state.schemas.ui_user = uiUser;
-  state.schemas.ui_baseline = uiBaseline;
-  state.schemas.ui_tuning = uiTuning;
-
-  state.data.user_profile = userSchema.default_payload || {};
-  state.data.baseline = baselineSchema.default_payload || {};
-  state.data.tuning = tuningSchema.default_payload || {};
-
-  renderModule("user_profile", $("#render_user"), uiUser, state.data.user_profile);
-  renderModule("baseline", $("#render_baseline"), uiBaseline, state.data.baseline);
-  renderModule("tuning", $("#render_tuning"), uiTuning, state.data.tuning);
-
-  dirty=false;
-  setStatus("已加载");
-}
-
+// 方案A：无预设。保留占位避免旧按钮/旧逻辑报错。
 async function loadPresets(){
-  const res = await apiGet("/api/presets");
-  state.presets = res.rows || [];
-  const sel = $("#presetSelect");
-  sel.innerHTML = "";
-  sel.appendChild(el("option", { value:"", text:"— 选择 preset —" }));
-  for (const p of state.presets){
-    sel.appendChild(el("option", { value:p.id, text:p.name }));
+  return;
+}
+
+let __switchPackLock = false;
+async function maybeSwitchPack(nextPlatform){
+  if (__switchPackLock) return;
+  const current = state.data.user_profile?.platform || "xiaohongshu";
+  const next = (nextPlatform || current || "xiaohongshu");
+  if (next === current && state.schemas.pack_name) return;
+
+  __switchPackLock = true;
+  try{
+    await loadSchemas(next);
+  } finally {
+    __switchPackLock = false;
   }
 }
 
-async function previewPrompt(){
-  setStatus("生成 prompt preview...");
-  const res = await apiPost("/api/preview", collectPayload());
-  $("#promptPreview").value = res.prompt || "";
-  $("#previewMeta").textContent = res.meta ? JSON.stringify(res.meta) : "";
-  setStatus("预览已生成（未生成内容）");
-}
-
-async function generate(){
-  setStatus("生成中...");
-  const res = await apiPost("/api/generate", collectPayload());
-  $("#outputBox").value = typeof res.output === "string" ? res.output : JSON.stringify(res.output, null, 2);
-  $("#jobMeta").textContent = `job_id: ${res.job_id || ""}`;
-  setStatus("已生成");
-}
 
 async function presetSave(){
   const name = ($("#presetName").value || "").trim();
-  if (!name) return setStatus("请填写 preset 名称");
-  setStatus("保存 preset...");
+  if (!name) return setStatus("请填写预设名称");
+  setStatus("保存预设...");
   const res = await apiPost("/api/presets/save", { name, payload: collectPayload() });
-  await loadPresets();
-  $("#presetSelect").value = res.id;
-  dirty=false;
-  setStatus("preset 已保存");
+    $("#presetSelect").value = res.id;
+  setStatus("预设已保存");
 }
 async function presetLoad(){
   const id = $("#presetSelect").value;
-  if (!id) return setStatus("请选择 preset");
-  setStatus("加载 preset...");
+  if (!id) return setStatus("请选择预设");
+  setStatus("加载预设...");
   const res = await apiGet(`/api/presets/${encodeURIComponent(id)}`);
   const p = res.preset;
   $("#presetName").value = p.name || "";
@@ -475,70 +455,58 @@ async function presetLoad(){
   state.data.user_profile = payload.user_profile || {};
   state.data.baseline = payload.baseline || {};
   state.data.tuning = payload.tuning || {};
-  renderModule("user_profile", $("#render_user"), state.schemas.ui_user, state.data.user_profile);
-  renderModule("baseline", $("#render_baseline"), state.schemas.ui_baseline, state.data.baseline);
-  renderModule("tuning", $("#render_tuning"), state.schemas.ui_tuning, state.data.tuning);
-  dirty=false;
-  setStatus("preset 已加载");
+  renderLeft();
+  setStatus("预设已加载");
 }
 async function presetDelete(){
   const id = $("#presetSelect").value;
-  if (!id) return setStatus("请选择 preset");
-  setStatus("删除 preset...");
+  if (!id) return setStatus("请选择预设");
+  setStatus("删除预设...");
   await apiPost("/api/presets/delete", { id });
   $("#presetName").value = "";
-  await loadPresets();
-  setStatus("preset 已删除");
+    setStatus("预设已删除");
 }
 
 function setupButtons(){
-  $("#btnModeToggle")?.addEventListener("click", ()=>{
-    UI.simpleMode = !UI.simpleMode;
-    applyUIMode();
-  });
-  $("#btnToggleTuning")?.addEventListener("click", ()=>{
-    UI.tuningCollapsed = !UI.tuningCollapsed;
-    applyUIMode();
-  });
-  $("#btnClearDraft")?.addEventListener("click", ()=>{
-    clearDraft();
-  });
   $("#btnSaveConn").addEventListener("click", saveConn);
   $("#btnReloadSchemas").addEventListener("click", async ()=>{
-    try{ await loadSchemas(); await loadPresets(); }catch(e){ setStatus(`Reload 失败：${e.message}`); }
+    try{ await loadSchemas(); await loadPresets(); }catch(e){ setStatus(`重新加载失败：${e.message}`); }
   });
-  $("#btnPreview").addEventListener("click", async ()=>{ try{ await previewPrompt(); }catch(e){ setStatus(`Preview 失败：${e.message}`); } });
-  $("#btnGenerate").addEventListener("click", async (e)=>{ try{ await previewPrompt(); await generate(); }catch(err){ setStatus(`生成失败：${err.message}`); } });
+  $("#btnPreview").addEventListener("click", async ()=>{ try{ await previewPrompt(); }catch(e){ setStatus(`预览失败：${e.message}`); } });
+  $("#btnGenerate").addEventListener("click", async ()=>{ try{ await generate(); }catch(e){ setStatus(`生成失败：${e.message}`); } });
 
-  $("#btnPresetSave").addEventListener("click", async ()=>{ try{ await presetSave(); }catch(e){ setStatus(`Preset 保存失败：${e.message}`); } });
-  $("#btnPresetLoad").addEventListener("click", async ()=>{ try{ await presetLoad(); }catch(e){ setStatus(`Preset 加载失败：${e.message}`); } });
-  $("#btnPresetDelete").addEventListener("click", async ()=>{ try{ await presetDelete(); }catch(e){ setStatus(`Preset 删除失败：${e.message}`); } });
+  $("#btnPresetSave").addEventListener("click", async ()=>{ try{ await presetSave(); }catch(e){ setStatus(`保存失败：${e.message}`); } });
+  $("#btnPresetLoad").addEventListener("click", async ()=>{ try{ await presetLoad(); }catch(e){ setStatus(`加载失败：${e.message}`); } });
+  $("#btnPresetDelete").addEventListener("click", async ()=>{ try{ await presetDelete(); }catch(e){ setStatus(`删除失败：${e.message}`); } });
 
-  $("#btnLoadBaselineDefaults").addEventListener("click", ()=>{
-    state.data.baseline = state.schemas.baseline.default_payload || {};
-    renderModule("baseline", $("#render_baseline"), state.schemas.ui_baseline, state.data.baseline);
-    markDirty();
-    setStatus("已加载 Baseline 默认值");
+  $("#btnResetBaseline").addEventListener("click", ()=>{
+    state.data.baseline = state.schemas.baseline?.default_payload || {};
+    renderLeft();
+    markDirty("已重置 Baseline（草稿中）");
+  });
+
+  $("#btnClearDraft").addEventListener("click", ()=> clearDraft());
+
+  $("#btnSimpleMode").addEventListener("click", ()=>{
+    state.ui.simpleMode = !state.ui.simpleMode;
+    document.body.classList.toggle("mode-simple", state.ui.simpleMode);
+    $("#btnSimpleMode").textContent = state.ui.simpleMode ? "全部模式" : "简洁模式";
+    setStatus(state.ui.simpleMode ? "简洁模式：只显示导航" : "全部模式：可编辑字段");
+    renderLeft();
   });
 }
 
 async function init(){
   loadConn();
-  loadUIState();
-  applyUIMode();
   setupSeg();
+  setupAcc();
   setupButtons();
+
   try{
     await loadSchemas();
-    await loadPresets();
-
-    // restore draft after schemas are ready (so UI schema exists)
-    restoreDraftIfAny();
-
-    applyUIMode();
-    setStatus("就绪");
+        setStatus("就绪");
   }catch(e){
-    setStatus(`初始化失败：${e.message}（请检查 Worker 地址与 Token）`);
+    setStatus(`初始化失败：${e.message}（检查 Worker 地址与 Token）`);
   }
 }
 init();
