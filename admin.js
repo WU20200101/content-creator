@@ -13,6 +13,7 @@ const state = {
   conn: { baseUrl: "", token: "" },
   schemas: { user_profile:null, baseline:null, tuning:null, ui_user:null, ui_baseline:null, ui_tuning:null },
   data: { user_profile:{}, baseline:{}, tuning:{} },
+  currentPlatform: "xiaohongshu",
   presets: [],
   ui: { simpleMode:false, activeSecId:null },
 };
@@ -125,7 +126,9 @@ function markDirty(msg){
 }
 
 function collectPayload(){
-  return { user_profile: state.data.user_profile||{}, baseline: state.data.baseline||{}, tuning: state.data.tuning||{} };
+  const user_profile = Object.assign({}, state.data.user_profile || {});
+  user_profile.platform = state.currentPlatform || user_profile.platform || "xiaohongshu";
+  return { user_profile, baseline: state.data.baseline||{}, tuning: state.data.tuning||{} };
 }
 
 /* Sections index */
@@ -189,6 +192,11 @@ function renderFieldControl(moduleKey, field, dataObj){
   const bindPath = field.bind?.path;
   if (!bindPath) return null;
 
+  // 平台只允许在顶部切换（避免双入口互相打架）
+  if (moduleKey === "user_profile" && bindPath === "platform"){
+    return null;
+  }
+
   const ctlType = field.control?.type || "text";
   const label = field.label || bindPath;
   const help = field.help || "";
@@ -207,14 +215,6 @@ function renderFieldControl(moduleKey, field, dataObj){
     sel.value = String(deepGet(dataObj, bindPath) ?? field.default ?? "");
 		sel.addEventListener("change", ()=>{
 			deepSet(dataObj, bindPath, sel.value);
-
-			// 平台切换：自动加载对应 schema pack（只影响 UI/schema，不强制清空用户已填数据）
-			if (moduleKey === "user_profile" && bindPath === "platform"){
-				state.data.user_profile = state.data.user_profile || {};
-				state.data.user_profile.platform = sel.value;
-				maybeSwitchPack(sel.value).catch(()=>{});
-			}
-
 			syncAllJsonFromState(); markDirty(); renderSectionList();
 		});
     controlNode = el("div", { class:"ctl" }, [sel]);
@@ -385,10 +385,27 @@ function setupAcc(){
   });
 }
 
+function defaultsFromSchema(schema){
+  const out = {};
+  const fields = schema?.fields || [];
+  for (const f of fields){
+    const d = f.default;
+    if (d === undefined) continue;
+    const path = (f.bind && f.bind.path) ? f.bind.path : null;
+    if (!path) continue;
+    setByPath(out, path, d);
+  }
+  return out;
+}
+
 /* Load schemas + presets */
-async function loadSchemas(platform){
-  const p = (platform || state.data.user_profile?.platform || "xiaohongshu");
+async function loadSchemas(platform, forceReset=false){
+  const p = (platform || state.currentPlatform || state.data.user_profile?.platform || "xiaohongshu");
+  state.currentPlatform = p;
+  const topSel = document.getElementById("platformTopSelect");
+  if (topSel) topSel.value = p;
   setStatus(`加载 schema pack... (${p})`);
+
   const pack = await apiGet(`/api/ui/schema?platform=${encodeURIComponent(p)}`);
 
   // 方案A：ui_schema 同时作为渲染用的 schema（包含 type/enum/default 等）
@@ -402,36 +419,40 @@ async function loadSchemas(platform){
   state.schemas.ui_baseline = pack.baseline_schema;
   state.schemas.ui_tuning = pack.tuning_schema;
 
-  // 首次初始化时才填默认值；切包时尽量保留用户已有输入
-  if (!state.__hasInitData) {
-    state.data.user_profile = {};
-    state.data.baseline = (pack.baseline_schema && pack.baseline_schema.default_payload) ? pack.baseline_schema.default_payload : {};
-    state.data.tuning = { text: "" };
+  // 初始化 / 切换平台时：按当前 pack 的默认值重建数据（避免字段错位）
+  if (!state.__hasInitData || forceReset) {
+    state.data.user_profile = defaultsFromSchema(pack.user_profile_schema);
+    state.data.baseline = defaultsFromSchema(pack.baseline_schema);
+    state.data.tuning = defaultsFromSchema(pack.tuning_schema);
     state.__hasInitData = true;
   }
+
+  // platform 永远由顶部选择器控制
+  state.data.user_profile = state.data.user_profile || {};
+  state.data.user_profile.platform = p;
 
   const usedDraft = loadDraft();
   renderLeft();
   setStatus(usedDraft ? "已加载草稿" : "已加载空表单");
+
+  // 每次加载 pack 后刷新预设列表
+  await loadPresets();
 }
 
-// 方案A：无预设。保留占位避免旧按钮/旧逻辑报错。
 async function loadPresets(){
-  return;
-}
-
-let __switchPackLock = false;
-async function maybeSwitchPack(nextPlatform){
-  if (__switchPackLock) return;
-  const current = state.data.user_profile?.platform || "xiaohongshu";
-  const next = (nextPlatform || current || "xiaohongshu");
-  if (next === current && state.schemas.pack_name) return;
-
-  __switchPackLock = true;
   try{
-    await loadSchemas(next);
-  } finally {
-    __switchPackLock = false;
+    const res = await apiGet("/api/presets/list");
+    state.presets = res.presets || [];
+    const sel = $("#presetSelect");
+    if (sel){
+      const cur = sel.value;
+      sel.innerHTML = `<option value="">（选择预设）</option>` + state.presets.map(p=>
+        `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`
+      ).join("");
+      if (cur) sel.value = cur;
+    }
+  }catch(e){
+    // 不阻塞主流程
   }
 }
 
@@ -441,20 +462,32 @@ async function presetSave(){
   if (!name) return setStatus("请填写预设名称");
   setStatus("保存预设...");
   const res = await apiPost("/api/presets/save", { name, payload: collectPayload() });
-    $("#presetSelect").value = res.id;
+  await loadPresets();
+  $("#presetSelect").value = res.id;
   setStatus("预设已保存");
 }
 async function presetLoad(){
   const id = $("#presetSelect").value;
   if (!id) return setStatus("请选择预设");
   setStatus("加载预设...");
-  const res = await apiGet(`/api/presets/${encodeURIComponent(id)}`);
+  const res = await apiGet(`/api/presets/get?id=${encodeURIComponent(id)}`);
   const p = res.preset;
   $("#presetName").value = p.name || "";
   const payload = JSON.parse(p.payload_json || "{}");
+
+  // 若预设属于其他平台，先切换 pack 再加载，避免字段错位
+  const plat = payload?.user_profile?.platform || state.currentPlatform || "xiaohongshu";
+  if (plat !== state.currentPlatform) {
+    await loadSchemas(plat, true);
+  }
+
   state.data.user_profile = payload.user_profile || {};
   state.data.baseline = payload.baseline || {};
   state.data.tuning = payload.tuning || {};
+  state.data.user_profile.platform = plat;
+  state.currentPlatform = plat;
+  const topSel = document.getElementById("platformTopSelect");
+  if (topSel) topSel.value = plat;
   renderLeft();
   setStatus("预设已加载");
 }
@@ -463,16 +496,16 @@ async function presetDelete(){
   if (!id) return setStatus("请选择预设");
   setStatus("删除预设...");
   await apiPost("/api/presets/delete", { id });
+  await loadPresets();
   $("#presetName").value = "";
-    setStatus("预设已删除");
+  setStatus("预设已删除");
 }
 
 
 async function previewPrompt(){
   setStatus("预览脚本...");
   const payload = collectPayload();
-  const p = payload.user_profile?.platform || "xiaohongshu";
-  await maybeSwitchPack(p);
+  await loadSchemas(state.currentPlatform, false);
 
   const res = await apiPost("/api/preview", payload);
   const promptEl = document.getElementById("promptPreview");
@@ -484,8 +517,7 @@ async function previewPrompt(){
 async function generate(){
   setStatus("生成中...");
   const payload = collectPayload();
-  const p = payload.user_profile?.platform || "xiaohongshu";
-  await maybeSwitchPack(p);
+  await loadSchemas(state.currentPlatform, false);
 
   const res = await apiPost("/api/generate", payload);
   const promptEl = document.getElementById("promptPreview");
@@ -512,7 +544,7 @@ async function generate(){
 function setupButtons(){
   $("#btnSaveConn").addEventListener("click", saveConn);
   $("#btnReloadSchemas").addEventListener("click", async ()=>{
-    try{ await loadSchemas(); await loadPresets(); }catch(e){ setStatus(`重新加载失败：${e.message}`); }
+    try{ await loadSchemas(state.currentPlatform, true); await loadPresets(); }catch(e){ setStatus(`重新加载失败：${e.message}`); }
   });
   $("#btnPreview").addEventListener("click", async ()=>{ try{ await previewPrompt(); }catch(e){ setStatus(`预览失败：${e.message}`); } });
   $("#btnGenerate").addEventListener("click", async ()=>{ try{ await generate(); }catch(e){ setStatus(`生成失败：${e.message}`); } });
@@ -538,14 +570,39 @@ function setupButtons(){
   });
 }
 
+function setupPlatformTop(){
+  const sel = document.getElementById("platformTopSelect");
+  if(!sel) return;
+
+  // 保持与 pack 映射一致
+  const options = [
+    { value:"xiaohongshu", label:"小红书" },
+    { value:"douyin_copy", label:"抖音文案" },
+    { value:"general", label:"通用" },
+  ];
+  sel.innerHTML = options.map(o=>`<option value="${o.value}">${o.label}</option>`).join("");
+  sel.value = state.currentPlatform || "xiaohongshu";
+
+  sel.addEventListener("change", async()=>{
+    const p = sel.value || "xiaohongshu";
+    try{
+      await loadSchemas(p, true);
+      setStatus(`已切换：${sel.options[sel.selectedIndex]?.text || p}`);
+    }catch(e){
+      setStatus(`切换失败：${e.message}`);
+    }
+  });
+}
+
 async function init(){
   loadConn();
   setupSeg();
   setupAcc();
   setupButtons();
+  setupPlatformTop();
 
   try{
-    await loadSchemas();
+    await loadSchemas(state.currentPlatform, true);
         setStatus("就绪");
   }catch(e){
     setStatus(`初始化失败：${e.message}（检查 Worker 地址与 Token）`);
